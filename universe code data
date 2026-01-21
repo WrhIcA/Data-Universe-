@@ -1,0 +1,2391 @@
+"""
+Universal Pattern Recognition Framework (UPRF)
+A comprehensive computational toolkit for analyzing fractal patterns, 
+phase transitions, and information integration across scales.
+
+Developed for NASA AWG and Copernicus Program contributions.
+Author: [Your Name]
+Version: 1.0.0
+Date: January 2026
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import signal, optimize, stats
+from scipy.fft import fft, fftfreq
+from scipy.spatial.distance import pdist, squareform
+from typing import List, Tuple, Dict, Optional, Union
+import warnings
+warnings.filterwarnings('ignore')
+
+
+# ============================================================================
+# SECTION 1: FRACTAL ANALYSIS
+# ============================================================================
+
+class FractalAnalyzer:
+    """
+    Analyzes fractal patterns and self-similarity across scales.
+    """
+    
+    @staticmethod
+    def box_counting_dimension(data: np.ndarray, 
+                              min_box_size: float = 1, 
+                              max_box_size: float = 100,
+                              n_samples: int = 20) -> Tuple[float, np.ndarray, np.ndarray]:
+        """
+        Estimate fractal dimension using box-counting method.
+        
+        Parameters:
+        -----------
+        data : np.ndarray
+            N-dimensional array of points (shape: n_points x n_dimensions)
+        min_box_size : float
+            Smallest box size to test
+        max_box_size : float
+            Largest box size to test
+        n_samples : int
+            Number of box sizes to sample
+            
+        Returns:
+        --------
+        D : float
+            Estimated fractal dimension
+        box_sizes : np.ndarray
+            Array of box sizes used
+        counts : np.ndarray
+            Number of boxes at each size
+        """
+        box_sizes = np.logspace(np.log10(min_box_size), 
+                               np.log10(max_box_size), 
+                               n_samples)
+        counts = []
+        
+        for box_size in box_sizes:
+            # Discretize space into boxes
+            boxes = np.floor(data / box_size).astype(int)
+            # Count unique boxes containing data
+            unique_boxes = np.unique(boxes, axis=0)
+            counts.append(len(unique_boxes))
+        
+        counts = np.array(counts)
+        
+        # Fit log-log relationship: log(N) = -D*log(ε) + const
+        coeffs = np.polyfit(np.log(box_sizes), np.log(counts), 1)
+        D = -coeffs[0]
+        
+        return D, box_sizes, counts
+    
+    @staticmethod
+    def correlation_dimension(data: np.ndarray, 
+                             max_distance: float = None,
+                             n_samples: int = 20) -> Tuple[float, np.ndarray, np.ndarray]:
+        """
+        Calculate correlation dimension using Grassberger-Procaccia algorithm.
+        
+        Parameters:
+        -----------
+        data : np.ndarray
+            Point cloud data (n_points x n_dimensions)
+        max_distance : float
+            Maximum distance to consider
+        n_samples : int
+            Number of distance scales
+            
+        Returns:
+        --------
+        D : float
+            Correlation dimension
+        distances : np.ndarray
+            Distance scales
+        correlations : np.ndarray
+            Correlation integrals
+        """
+        # Calculate pairwise distances
+        distances_matrix = pdist(data)
+        
+        if max_distance is None:
+            max_distance = np.max(distances_matrix)
+        
+        # Sample distance scales
+        scales = np.logspace(np.log10(max_distance/100), 
+                            np.log10(max_distance), 
+                            n_samples)
+        
+        correlations = []
+        for r in scales:
+            # Count pairs within distance r
+            C_r = np.sum(distances_matrix < r) / len(distances_matrix)
+            correlations.append(C_r)
+        
+        correlations = np.array(correlations)
+        
+        # Fit log-log relationship in scaling region
+        valid = (correlations > 0) & (correlations < 1)
+        if np.sum(valid) > 2:
+            coeffs = np.polyfit(np.log(scales[valid]), 
+                              np.log(correlations[valid]), 1)
+            D = coeffs[0]
+        else:
+            D = np.nan
+        
+        return D, scales, correlations
+    
+    @staticmethod
+    def generate_fractal_pattern(iterations: int = 5,
+                                branching_factor: int = 2,
+                                angle_variation: float = np.pi/4,
+                                length_ratio: float = 1.618) -> Tuple[np.ndarray, List]:
+        """
+        Generate fractal branching pattern (tree-like structure).
+        
+        Parameters:
+        -----------
+        iterations : int
+            Depth of recursion
+        branching_factor : int
+            Number of branches per node
+        angle_variation : float
+            Angular spread of branches (radians)
+        length_ratio : float
+            Length reduction ratio (default: golden ratio)
+            
+        Returns:
+        --------
+        points : np.ndarray
+            Array of (x, y) coordinates
+        connections : list
+            List of (parent, child) index pairs
+        """
+        points = [(0.0, 0.0)]
+        connections = []
+        
+        def branch(parent_idx, depth, angle, length):
+            if depth >= iterations:
+                return
+            
+            parent = points[parent_idx]
+            for i in range(branching_factor):
+                # Calculate branch angle
+                branch_angle = angle + (i - branching_factor/2 + 0.5) * angle_variation
+                
+                # New point position
+                new_x = parent[0] + length * np.cos(branch_angle)
+                new_y = parent[1] + length * np.sin(branch_angle)
+                new_idx = len(points)
+                points.append((new_x, new_y))
+                connections.append((parent_idx, new_idx))
+                
+                # Recursive branching with reduced length
+                branch(new_idx, depth+1, branch_angle, length/length_ratio)
+        
+        # Start branching from root
+        branch(0, 0, np.pi/2, 1.0)
+        
+        return np.array(points), connections
+    
+    @staticmethod
+    def self_similarity_score(data: np.ndarray, 
+                             scale_factors: List[float] = [2, 4, 8]) -> float:
+        """
+        Measure self-similarity across different scales.
+        
+        Parameters:
+        -----------
+        data : np.ndarray
+            2D array (image or pattern)
+        scale_factors : list
+            Scaling factors to test
+            
+        Returns:
+        --------
+        similarity : float
+            Average correlation between original and scaled versions
+        """
+        from scipy.ndimage import zoom
+        
+        similarities = []
+        
+        for scale in scale_factors:
+            # Downsample
+            scaled = zoom(data, 1/scale, order=1)
+            
+            # Upsample back to original size
+            restored = zoom(scaled, scale, order=1)
+            
+            # Crop to match dimensions
+            min_shape = min(data.shape[0], restored.shape[0])
+            data_crop = data[:min_shape, :min_shape]
+            restored_crop = restored[:min_shape, :min_shape]
+            
+            # Calculate correlation
+            correlation = np.corrcoef(data_crop.flatten(), 
+                                     restored_crop.flatten())[0, 1]
+            similarities.append(correlation)
+        
+        return np.mean(similarities)
+
+
+# ============================================================================
+# SECTION 2: PHASE TRANSITION ANALYSIS
+# ============================================================================
+
+class PhaseTransitionAnalyzer:
+    """
+    Detects and analyzes phase transitions in time series and systems.
+    """
+    
+    @staticmethod
+    def detect_transitions(time_series: np.ndarray,
+                          window_size: int = 100,
+                          threshold_factor: float = 3.0) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Detect phase transitions in time series data.
+        
+        Parameters:
+        -----------
+        time_series : np.ndarray
+            1D array of observations
+        window_size : int
+            Size of sliding window for variance calculation
+        threshold_factor : float
+            Multiplier for standard deviation threshold
+            
+        Returns:
+        --------
+        transitions : np.ndarray
+            Indices of detected transitions
+        order_parameter : np.ndarray
+            Computed order parameter trajectory
+        """
+        if len(time_series) < window_size:
+            raise ValueError("Time series too short for given window size")
+        
+        # Compute order parameter (variance as proxy)
+        order_param = np.zeros(len(time_series) - window_size)
+        
+        for i in range(len(order_param)):
+            window = time_series[i:i+window_size]
+            order_param[i] = np.var(window)
+        
+        # Detect sudden changes (second derivative)
+        d2_order = np.gradient(np.gradient(order_param))
+        
+        # Threshold for transition detection
+        threshold = threshold_factor * np.std(d2_order)
+        transitions = np.where(np.abs(d2_order) > threshold)[0]
+        
+        return transitions, order_param
+    
+    @staticmethod
+    def landau_free_energy(psi: np.ndarray, 
+                          theta: float, 
+                          theta_c: float,
+                          a: float = 1.0, 
+                          b: float = 1.0) -> np.ndarray:
+        """
+        Calculate Landau free energy for phase transition.
+        
+        F(ψ, θ) = a(θ - θc)ψ² + bψ⁴
+        
+        Parameters:
+        -----------
+        psi : np.ndarray
+            Order parameter values
+        theta : float
+            Control parameter
+        theta_c : float
+            Critical threshold
+        a, b : float
+            System constants
+            
+        Returns:
+        --------
+        F : np.ndarray
+            Free energy values
+        """
+        return a * (theta - theta_c) * psi**2 + b * psi**4
+    
+    @staticmethod
+    def find_critical_point(time_series: np.ndarray,
+                           control_param: np.ndarray) -> Dict:
+        """
+        Identify critical point in a system undergoing phase transition.
+        
+        Parameters:
+        -----------
+        time_series : np.ndarray
+            Observable (order parameter)
+        control_param : np.ndarray
+            Control parameter trajectory
+            
+        Returns:
+        --------
+        result : dict
+            Dictionary with critical point information
+        """
+        # Calculate susceptibility (derivative of order parameter)
+        susceptibility = np.abs(np.gradient(time_series, control_param))
+        
+        # Critical point has maximum susceptibility
+        critical_idx = np.argmax(susceptibility)
+        
+        return {
+            'critical_index': critical_idx,
+            'critical_control_value': control_param[critical_idx],
+            'critical_order_value': time_series[critical_idx],
+            'max_susceptibility': susceptibility[critical_idx],
+            'susceptibility': susceptibility
+        }
+    
+    @staticmethod
+    def simulate_phase_transition(theta_range: np.ndarray,
+                                 theta_c: float = 0.0,
+                                 noise_level: float = 0.1) -> np.ndarray:
+        """
+        Simulate order parameter evolution through phase transition.
+        
+        Parameters:
+        -----------
+        theta_range : np.ndarray
+            Range of control parameter values
+        theta_c : float
+            Critical threshold
+        noise_level : float
+            Amplitude of random fluctuations
+            
+        Returns:
+        --------
+        psi : np.ndarray
+            Order parameter trajectory
+        """
+        psi = np.zeros_like(theta_range)
+        
+        for i, theta in enumerate(theta_range):
+            if theta < theta_c:
+                psi[i] = 0.0
+            else:
+                # ψ = √[(θ - θc)/2] for simple Landau model
+                psi[i] = np.sqrt(max(0, theta - theta_c))
+            
+            # Add noise
+            psi[i] += noise_level * np.random.randn()
+        
+        return psi
+
+
+# ============================================================================
+# SECTION 3: WAVE INTERFERENCE AND RESONANCE
+# ============================================================================
+
+class WaveAnalyzer:
+    """
+    Analyzes wave interference, resonance, and information integration.
+    """
+    
+    @staticmethod
+    def wave_function(x: np.ndarray, 
+                     t: np.ndarray,
+                     amplitude: float = 1.0,
+                     wave_number: float = 1.0,
+                     frequency: float = 1.0,
+                     phase: float = 0.0) -> np.ndarray:
+        """
+        Generate wave function K(x,t) = A·sin(kx - ωt + φ).
+        
+        Parameters:
+        -----------
+        x : np.ndarray
+            Spatial coordinates
+        t : np.ndarray
+            Time coordinates
+        amplitude : float
+            Wave amplitude A
+        wave_number : float
+            Wave number k
+        frequency : float
+            Angular frequency ω
+        phase : float
+            Phase offset φ
+            
+        Returns:
+        --------
+        wave : np.ndarray
+            Wave values at (x, t)
+        """
+        X, T = np.meshgrid(x, t)
+        wave = amplitude * np.sin(wave_number * X - frequency * T + phase)
+        return wave
+    
+    @staticmethod
+    def interference_pattern(sources: List[Dict],
+                           x_range: Tuple[float, float] = (-10, 10),
+                           t_range: Tuple[float, float] = (0, 10),
+                           resolution: int = 500) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Simulate interference pattern from multiple wave sources.
+        
+        Parameters:
+        -----------
+        sources : list of dict
+            Each dict contains: {A, k, omega, phi, position}
+        x_range : tuple
+            Spatial domain (min, max)
+        t_range : tuple
+            Temporal domain (min, max)
+        resolution : int
+            Number of points in each dimension
+            
+        Returns:
+        --------
+        pattern : np.ndarray
+            Interference pattern (time x space)
+        X : np.ndarray
+            Spatial mesh
+        T : np.ndarray
+            Temporal mesh
+        """
+        x = np.linspace(x_range[0], x_range[1], resolution)
+        t = np.linspace(t_range[0], t_range[1], resolution)
+        X, T = np.meshgrid(x, t)
+        
+        pattern = np.zeros_like(X)
+        
+        for source in sources:
+            # Distance from source
+            r = np.abs(X - source.get('position', 0))
+            
+            # Wave contribution
+            A = source.get('A', 1.0)
+            k = source.get('k', 1.0)
+            omega = source.get('omega', 1.0)
+            phi = source.get('phi', 0.0)
+            
+            wave = A * np.sin(k * r - omega * T + phi)
+            pattern += wave
+        
+        return pattern, X, T
+    
+    @staticmethod
+    def calculate_intensity(waves: List[np.ndarray],
+                          phases: List[float]) -> float:
+        """
+        Calculate interference intensity from multiple waves.
+        
+        I = Σ|Kᵢ|² + 2Σᵢ<ⱼ|Kᵢ||Kⱼ|cos(φᵢ - φⱼ)
+        
+        Parameters:
+        -----------
+        waves : list of np.ndarray
+            Amplitude of each wave
+        phases : list of float
+            Phase of each wave
+            
+        Returns:
+        --------
+        intensity : float
+            Total interference intensity
+        """
+        amplitudes = [np.mean(np.abs(w)) for w in waves]
+        
+        # Direct intensity
+        intensity = sum(A**2 for A in amplitudes)
+        
+        # Interference terms
+        n = len(amplitudes)
+        for i in range(n):
+            for j in range(i+1, n):
+                phase_diff = phases[i] - phases[j]
+                intensity += 2 * amplitudes[i] * amplitudes[j] * np.cos(phase_diff)
+        
+        return intensity
+    
+    @staticmethod
+    def detect_resonance(signal1: np.ndarray,
+                        signal2: np.ndarray,
+                        sampling_rate: float = 1.0,
+                        phase_tolerance: float = 0.1) -> Dict:
+        """
+        Detect resonance between two signals.
+        
+        Parameters:
+        -----------
+        signal1, signal2 : np.ndarray
+            Input signals
+        sampling_rate : float
+            Sampling frequency
+        phase_tolerance : float
+            Maximum phase difference for resonance (radians)
+            
+        Returns:
+        --------
+        result : dict
+            Resonance information including frequencies and phase difference
+        """
+        # Compute FFT
+        fft1 = fft(signal1)
+        fft2 = fft(signal2)
+        freqs = fftfreq(len(signal1), 1/sampling_rate)
+        
+        # Find dominant frequencies (positive frequencies only)
+        pos_mask = freqs > 0
+        freqs_pos = freqs[pos_mask]
+        fft1_pos = fft1[pos_mask]
+        fft2_pos = fft2[pos_mask]
+        
+        # Dominant frequency indices
+        idx1 = np.argmax(np.abs(fft1_pos))
+        idx2 = np.argmax(np.abs(fft2_pos))
+        
+        # Dominant frequencies
+        freq1 = freqs_pos[idx1]
+        freq2 = freqs_pos[idx2]
+        
+        # Phase difference
+        phase1 = np.angle(fft1_pos[idx1])
+        phase2 = np.angle(fft2_pos[idx2])
+        phase_diff = np.abs(phase1 - phase2)
+        
+        # Normalize to [0, π]
+        phase_diff = min(phase_diff, 2*np.pi - phase_diff)
+        
+        # Check resonance
+        is_resonant = (np.abs(freq1 - freq2) < 0.1 * freq1 and 
+                      phase_diff < phase_tolerance)
+        
+        return {
+            'is_resonant': is_resonant,
+            'frequency_1': freq1,
+            'frequency_2': freq2,
+            'phase_difference': phase_diff,
+            'correlation': np.corrcoef(signal1, signal2)[0, 1]
+        }
+
+
+# ============================================================================
+# SECTION 4: ENTROPY AND INFORMATION DYNAMICS
+# ============================================================================
+
+class EntropyAnalyzer:
+    """
+    Analyzes entropy, negentropy, and information dynamics.
+    """
+    
+    @staticmethod
+    def shannon_entropy(data: np.ndarray, bins: int = 50) -> float:
+        """
+        Calculate Shannon entropy of data.
+        
+        H = -Σ p(x) log₂ p(x)
+        
+        Parameters:
+        -----------
+        data : np.ndarray
+            Input data
+        bins : int
+            Number of histogram bins
+            
+        Returns:
+        --------
+        entropy : float
+            Shannon entropy in bits
+        """
+        # Create histogram
+        counts, _ = np.histogram(data, bins=bins)
+        
+        # Normalize to probabilities
+        probabilities = counts / np.sum(counts)
+        
+        # Remove zero probabilities
+        probabilities = probabilities[probabilities > 0]
+        
+        # Calculate entropy
+        entropy = -np.sum(probabilities * np.log2(probabilities))
+        
+        return entropy
+    
+    @staticmethod
+    def order_evolution(initial_entropy: float,
+                       practice_function: callable,
+                       time_range: np.ndarray,
+                       decay_rate: float = 0.1) -> np.ndarray:
+        """
+        Simulate order parameter evolution.
+        
+        dS/dt = -k·P(t) + λ·S
+        
+        Parameters:
+        -----------
+        initial_entropy : float
+            Starting entropy S₀
+        practice_function : callable
+            Function P(t) representing organizing input
+        time_range : np.ndarray
+            Time points
+        decay_rate : float
+            Natural decay constant λ
+            
+        Returns:
+        --------
+        entropy : np.ndarray
+            Entropy trajectory over time
+        """
+        entropy = np.zeros_like(time_range)
+        entropy[0] = initial_entropy
+        
+        dt = time_range[1] - time_range[0] if len(time_range) > 1 else 1.0
+        
+        for i in range(1, len(time_range)):
+            t = time_range[i]
+            P_t = practice_function(t)
+            
+            # Euler integration
+            dS = decay_rate * entropy[i-1] - P_t
+            entropy[i] = entropy[i-1] + dS * dt
+            
+            # Entropy cannot be negative
+            entropy[i] = max(0, entropy[i])
+        
+        return entropy
+    
+    @staticmethod
+    def mutual_information(x: np.ndarray, 
+                          y: np.ndarray, 
+                          bins: int = 50) -> float:
+        """
+        Calculate mutual information between two variables.
+        
+        I(X;Y) = H(X) + H(Y) - H(X,Y)
+        
+        Parameters:
+        -----------
+        x, y : np.ndarray
+            Input variables
+        bins : int
+            Number of histogram bins
+            
+        Returns:
+        --------
+        mi : float
+            Mutual information in bits
+        """
+        # Create 2D histogram
+        hist_2d, _, _ = np.histogram2d(x, y, bins=bins)
+        
+        # Marginal histograms
+        hist_x = np.sum(hist_2d, axis=1)
+        hist_y = np.sum(hist_2d, axis=0)
+        
+        # Normalize
+        p_xy = hist_2d / np.sum(hist_2d)
+        p_x = hist_x / np.sum(hist_x)
+        p_y = hist_y / np.sum(hist_y)
+        
+        # Calculate mutual information
+        mi = 0.0
+        for i in range(len(p_x)):
+            for j in range(len(p_y)):
+                if p_xy[i, j] > 0:
+                    mi += p_xy[i, j] * np.log2(p_xy[i, j] / (p_x[i] * p_y[j]))
+        
+        return mi
+    
+    @staticmethod
+    def complexity_measure(data: np.ndarray) -> Dict:
+        """
+        Calculate various complexity measures.
+        
+        Parameters:
+        -----------
+        data : np.ndarray
+            Input time series or pattern
+            
+        Returns:
+        --------
+        measures : dict
+            Dictionary of complexity metrics
+        """
+        # Shannon entropy
+        entropy = EntropyAnalyzer.shannon_entropy(data)
+        
+        # Approximate entropy (regularity measure)
+        def approx_entropy(U, m, r):
+            def _maxdist(x_i, x_j):
+                return max([abs(ua - va) for ua, va in zip(x_i, x_j)])
+            
+            def _phi(m):
+                x = [[U[j] for j in range(i, i + m - 1 + 1)] 
+                     for i in range(len(U) - m + 1)]
+                C = [len([1 for x_j in x if _maxdist(x_i, x_j) <= r]) / 
+                     (len(U) - m + 1.0) for x_i in x]
+                return (len(U) - m + 1.0)**(-1) * sum(np.log(C))
+            
+            return abs(_phi(m+1) - _phi(m))
+        
+        m, r = 2, 0.2 * np.std(data)
+        appr_ent = approx_entropy(data, m, r)
+        
+        # Sample entropy (improved approximate entropy)
+        # Simplified version
+        sample_ent = appr_ent  # Placeholder
+        
+        return {
+            'shannon_entropy': entropy,
+            'approximate_entropy': appr_ent,
+            'sample_entropy': sample_ent,
+            'std_deviation': np.std(data),
+            'variance': np.var(data)
+        }
+
+
+# ============================================================================
+# SECTION 5: GOLDEN RATIO AND FIBONACCI PATTERNS
+# ============================================================================
+
+class GoldenRatioAnalyzer:
+    """
+    Analyzes golden ratio and Fibonacci patterns in data.
+    """
+    
+    PHI = (1 + np.sqrt(5)) / 2  # Golden ratio
+    
+    @staticmethod
+    def fibonacci_sequence(n: int) -> np.ndarray:
+        """
+        Generate Fibonacci sequence up to n terms.
+        
+        Parameters:
+        -----------
+        n : int
+            Number of terms
+            
+        Returns:
+        --------
+        fib : np.ndarray
+            Fibonacci sequence
+        """
+        fib = np.zeros(n, dtype=int)
+        if n > 0:
+            fib[0] = 0
+        if n > 1:
+            fib[1] = 1
+        for i in range(2, n):
+            fib[i] = fib[i-1] + fib[i-2]
+        return fib
+    
+    @staticmethod
+    def golden_spiral(n_points: int = 1000, 
+                     a: float = 1.0,
+                     growth_rate: float = None) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Generate golden spiral coordinates.
+        
+        r(θ) = a·e^(bθ), where b = tan⁻¹(1/φ)
+        
+        Parameters:
+        -----------
+        n_points : int
+            Number of points
+        a : float
+            Initial radius
+        growth_rate : float
+            If None, uses golden ratio growth
+            
+        Returns:
+        --------
+        x, y : np.ndarray
+            Cartesian coordinates
+        """
+        phi = GoldenRatioAnalyzer.PHI
+        
+        if growth_rate is None:
+            b = np.arctan(1/phi)
+        else:
+            b = growth_rate
+        
+        # Angle range
+        theta = np.linspace(0, 4*np.pi, n_points)
+        
+        # Polar coordinates
+        r = a * np.exp(b * theta)
+        
+        # Convert to Cartesian
+        x = r * np.cos(theta)
+        y = r * np.sin(theta)
+        
+        return x, y
+    
+    @staticmethod
+    def detect_golden_ratio(data: np.ndarray, 
+                           tolerance: float = 0.05) -> Dict:
+        """
+        Detect golden ratio in sequential data.
+        
+        Parameters:
+        -----------
+        data : np.ndarray
+            Sequential measurements (e.g., sizes, intervals)
+        tolerance : float
+            Tolerance for ratio matching
+            
+        Returns:
+        --------
+        result : dict
+            Detection results and statistics
+        """
+        phi = GoldenRatioAnalyzer.PHI
+        
+        # Calculate ratios of consecutive elements
+        ratios = data[1:] / data[:-1]
+        
+        # Remove invalid ratios
+        ratios = ratios[np.isfinite(ratios) & (ratios > 0)]
+        
+        # Check how many ratios are close to φ
+        matches = np.abs(ratios - phi) < tolerance * phi
+        match_rate = np.sum(matches) / len(ratios) if len(ratios) > 0 else 0
+        
+        # Average ratio
+        avg_ratio = np.mean(ratios) if len(ratios) > 0 else 0
+        
+        return {
+            'contains_golden_ratio': match_rate > 0.5,
+            'match_rate': match_rate,
+            'average_ratio': avg_ratio,
+            'phi_deviation': np.abs(avg_ratio - phi),
+            'all_ratios': ratios
+        }
+    
+    @staticmethod
+    def optimal_spacing(total_time: float, 
+                       n_intervals: int,
+                       use_golden_ratio: bool = True) -> np.ndarray:
+        """
+        Generate optimal time spacing for learning/practice.
+        
+        Parameters:
+        -----------
+        total_time : float
+            Total time period
+        n_intervals : int
+            Number of intervals
+        use_golden_ratio : bool
+            If True, uses φ-based spacing
+            
+        Returns:
+        --------
+        intervals : np.ndarray
+            Optimal time points
+        """
+        if use_golden_ratio:
+            phi = GoldenRatioAnalyzer.PHI
+            # Geometric progression with φ
+            intervals = np.array([total_time * (1 - phi**(-i)) 
+                                 for i in range(n_intervals)])
+        else:
+            # Linear spacing
+            intervals = np.linspace(0, total_time, n_intervals)
+        
+        return intervals
+
+
+# ============================================================================
+# SECTION 6: PATTERN RECOGNITION AND SYNTHESIS
+# ============================================================================
+
+class PatternRecognizer:
+    """
+    Multi-scale pattern recognition and synthesis.
+    """
+    
+    @staticmethod
+    def multiscale_analysis(data: np.ndarray,
+                           scales: List[int] = None,
+                           method: str = 'wavelet') -> Dict:
+        """
+        Analyze patterns across multiple scales.
+        
+        Parameters:
+        -----------
+        data : np.ndarray
+            Input data (1D or 2D)
+        scales : list
+            List of scale factors
+        method : str
+            Analysis method ('wavelet', 'fourier', 'coarse_grain')
+            
+        Returns:
+        --------
+        analysis : dict
+            Multi-scale pattern information
+        """
+        if scales is None:
+            scales = [2**i for i in range(1, 5)]  # [2, 4, 8, 16]
+        
+        results = {}
+        
+        if method == 'wavelet':
+            # Continuous wavelet transform
+            widths = np.array(scales)
+            if data.ndim == 1:
+                cwt = signal.cwt(data, signal.ricker, widths)
+                results['coefficients'] = cwt
+                results['scales'] = scales
+                results['power'] = np.abs(cwt)**2
+        
+        elif method == 'fourier':
+            # Multi-scale Fourier analysis
+            for scale in scales:
+                # Downsample
+                downsampled = data[::scale]
+                # FFT
+                fft_result = fft(downsampled)
+                results[f'scale_{scale}'] = {
+                    'fft': fft_result,
+                    'power_spectrum': np.abs(fft_result)**2
+                }
+        
+        elif method == 'coarse_grain':
+            # Coarse-graining approach
+            for scale in scales:
+                # Average over blocks
+                n_blocks = len(data) // scale
+                coarse = np.array([np.mean(data[i*scale:(i+1)*scale]) 
+                                  for i in range(n_blocks)])
+                results[f'scale_{scale}'] = coarse
+        
+        return results
+    
+    @staticmethod
+    def correlation_analysis(data1: np.ndarray,
+                            data2: np.ndarray,
+                            max_lag: int = None) -> Dict:
+        """
+        Analyze correlation between two patterns.
+        
+        Parameters:
+        -----------
+        data1, data2 : np.ndarray
+            Input patterns
+        max_lag : int
+            Maximum lag for cross-correlation
+            
+        Returns:
+--------
+        result : dict
+            Correlation analysis results
+        """
+        if max_lag is None:
+            max_lag = min(len(data1), len(data2)) // 2
+        
+        # Cross-correlation
+        cross_corr = signal.correlate(data1, data2, mode='full')
+        lags = signal.correlation_lags(len(data1), len(data2), mode='full')
+        
+        # Restrict to max_lag
+        mask = np.abs(lags) <= max_lag
+        cross_corr = cross_corr[mask]
+        lags = lags[mask]
+        
+        # Find peak correlation
+        peak_idx = np.argmax(np.abs(cross_corr))
+        peak_lag = lags[peak_idx]
+        peak_corr = cross_corr[peak_idx]
+        
+        # Pearson correlation at zero lag
+        min_len = min(len(data1), len(data2))
+        pearson_corr = np.corrcoef(data1[:min_len], data2[:min_len])[0, 1]
+        
+        return {
+            'cross_correlation': cross_corr,
+            'lags': lags,
+            'peak_lag': peak_lag,
+            'peak_correlation': peak_corr,
+            'pearson_correlation': pearson_corr,
+            'is_synchronized': np.abs(peak_lag) < max_lag * 0.1
+        }
+    
+    @staticmethod
+    def extract_periodic_patterns(data: np.ndarray,
+                                  sampling_rate: float = 1.0) -> Dict:
+        """
+        Extract periodic patterns from data.
+        
+        Parameters:
+        -----------
+        data : np.ndarray
+            Input time series
+        sampling_rate : float
+            Sampling frequency
+            
+        Returns:
+        --------
+        patterns : dict
+            Identified periodic components
+        """
+        # FFT
+        fft_vals = fft(data)
+        freqs = fftfreq(len(data), 1/sampling_rate)
+        
+        # Power spectrum (positive frequencies only)
+        pos_mask = freqs > 0
+        freqs_pos = freqs[pos_mask]
+        power = np.abs(fft_vals[pos_mask])**2
+        
+        # Find peaks in power spectrum
+        peaks, properties = signal.find_peaks(power, 
+                                             height=np.mean(power),
+                                             distance=len(power)//20)
+        
+        # Extract dominant frequencies
+        dominant_freqs = freqs_pos[peaks]
+        dominant_powers = power[peaks]
+        
+        # Sort by power
+        sort_idx = np.argsort(dominant_powers)[::-1]
+        dominant_freqs = dominant_freqs[sort_idx]
+        dominant_powers = dominant_powers[sort_idx]
+        
+        return {
+            'frequencies': dominant_freqs,
+            'powers': dominant_powers,
+            'periods': 1/dominant_freqs if len(dominant_freqs) > 0 else [],
+            'full_spectrum': {'freqs': freqs_pos, 'power': power}
+        }
+    
+    @staticmethod
+    def pattern_complexity(data: np.ndarray) -> Dict:
+        """
+        Calculate pattern complexity metrics.
+        
+        Parameters:
+        -----------
+        data : np.ndarray
+            Input pattern
+            
+        Returns:
+        --------
+        complexity : dict
+            Various complexity measures
+        """
+        # Lempel-Ziv complexity (simplified)
+        def lempel_ziv_complexity(sequence):
+            """Simplified LZ complexity for binary sequences"""
+            n = len(sequence)
+            i, k, l = 0, 1, 1
+            c, k_max = 1, 1
+            
+            while True:
+                if i + k > n:
+                    break
+                if sequence[i:i+k] != sequence[l:l+k]:
+                    k += 1
+                else:
+                    c += 1
+                    i += k
+                    k = 1
+                    l = i + 1
+                if k > k_max:
+                    k_max = k
+            
+            return c
+        
+        # Binarize data for LZ complexity
+        binary_data = (data > np.median(data)).astype(int)
+        lz = lempel_ziv_complexity(binary_data)
+        
+        # Statistical complexity
+        entropy = EntropyAnalyzer.shannon_entropy(data)
+        
+        # Fractal dimension (1D)
+        try:
+            # Reshape for box counting
+            data_2d = np.column_stack([np.arange(len(data)), data])
+            fractal_dim, _, _ = FractalAnalyzer.box_counting_dimension(data_2d)
+        except:
+            fractal_dim = np.nan
+        
+        # Autocorrelation length
+        autocorr = np.correlate(data - np.mean(data), 
+                               data - np.mean(data), 
+                               mode='full')
+        autocorr = autocorr[len(autocorr)//2:]
+        autocorr = autocorr / autocorr[0]
+        
+        # Find where autocorrelation drops to 1/e
+        try:
+            corr_length = np.where(autocorr < 1/np.e)[0][0]
+        except:
+            corr_length = len(autocorr)
+        
+        return {
+            'lempel_ziv_complexity': lz,
+            'shannon_entropy': entropy,
+            'fractal_dimension': fractal_dim,
+            'autocorrelation_length': corr_length,
+            'variance': np.var(data),
+            'kurtosis': stats.kurtosis(data),
+            'skewness': stats.skew(data)
+        }
+
+
+# ============================================================================
+# SECTION 7: UNIVERSAL KNOWLEDGE INTEGRATION
+# ============================================================================
+
+class UniversalKnowledgeFramework:
+    """
+    Integrated framework for universal pattern analysis.
+    """
+    
+    def __init__(self):
+        self.fractal = FractalAnalyzer()
+        self.phase = PhaseTransitionAnalyzer()
+        self.wave = WaveAnalyzer()
+        self.entropy = EntropyAnalyzer()
+        self.golden = GoldenRatioAnalyzer()
+        self.pattern = PatternRecognizer()
+    
+    def comprehensive_analysis(self, data: np.ndarray, 
+                              data_type: str = 'timeseries') -> Dict:
+        """
+        Perform comprehensive analysis across all frameworks.
+        
+        Parameters:
+        -----------
+        data : np.ndarray
+            Input data
+        data_type : str
+            Type of data ('timeseries', 'spatial', 'network')
+            
+        Returns:
+        --------
+        analysis : dict
+            Complete analysis results
+        """
+        results = {
+            'data_type': data_type,
+            'data_shape': data.shape,
+            'timestamp': np.datetime64('now')
+        }
+        
+        # Fractal analysis
+        if data.ndim >= 2 or data_type == 'spatial':
+            try:
+                if data.ndim == 1:
+                    data_2d = np.column_stack([np.arange(len(data)), data])
+                else:
+                    data_2d = data
+                
+                D, box_sizes, counts = self.fractal.box_counting_dimension(data_2d)
+                results['fractal'] = {
+                    'dimension': D,
+                    'box_sizes': box_sizes,
+                    'counts': counts
+                }
+            except Exception as e:
+                results['fractal'] = {'error': str(e)}
+        
+        # Phase transition detection
+        if data_type == 'timeseries' and data.ndim == 1:
+            try:
+                transitions, order_param = self.phase.detect_transitions(data)
+                results['phase_transitions'] = {
+                    'transitions': transitions,
+                    'n_transitions': len(transitions),
+                    'order_parameter': order_param
+                }
+            except Exception as e:
+                results['phase_transitions'] = {'error': str(e)}
+        
+        # Entropy analysis
+        try:
+            results['entropy'] = self.entropy.complexity_measure(data.flatten())
+        except Exception as e:
+            results['entropy'] = {'error': str(e)}
+        
+        # Golden ratio detection
+        if data.ndim == 1 and len(data) > 2:
+            try:
+                results['golden_ratio'] = self.golden.detect_golden_ratio(np.abs(data))
+            except Exception as e:
+                results['golden_ratio'] = {'error': str(e)}
+        
+        # Pattern complexity
+        try:
+            results['complexity'] = self.pattern.pattern_complexity(data.flatten())
+        except Exception as e:
+            results['complexity'] = {'error': str(e)}
+        
+        # Periodic patterns
+        if data_type == 'timeseries' and data.ndim == 1:
+            try:
+                results['periodic_patterns'] = self.pattern.extract_periodic_patterns(data)
+            except Exception as e:
+                results['periodic_patterns'] = {'error': str(e)}
+        
+        return results
+    
+    def compare_patterns(self, pattern1: np.ndarray, 
+                        pattern2: np.ndarray) -> Dict:
+        """
+        Compare two patterns across multiple dimensions.
+        
+        Parameters:
+        -----------
+        pattern1, pattern2 : np.ndarray
+            Patterns to compare
+            
+        Returns:
+        --------
+        comparison : dict
+            Detailed comparison results
+        """
+        results = {}
+        
+        # Correlation analysis
+        try:
+            results['correlation'] = self.pattern.correlation_analysis(
+                pattern1.flatten(), 
+                pattern2.flatten()
+            )
+        except Exception as e:
+            results['correlation'] = {'error': str(e)}
+        
+        # Mutual information
+        try:
+            results['mutual_information'] = self.entropy.mutual_information(
+                pattern1.flatten(), 
+                pattern2.flatten()
+            )
+        except Exception as e:
+            results['mutual_information'] = {'error': str(e)}
+        
+        # Complexity comparison
+        try:
+            comp1 = self.pattern.pattern_complexity(pattern1.flatten())
+            comp2 = self.pattern.pattern_complexity(pattern2.flatten())
+            results['complexity_difference'] = {
+                'pattern1': comp1,
+                'pattern2': comp2,
+                'entropy_diff': abs(comp1['shannon_entropy'] - 
+                                  comp2['shannon_entropy'])
+            }
+        except Exception as e:
+            results['complexity_difference'] = {'error': str(e)}
+        
+        return results
+    
+    def generate_report(self, data: np.ndarray, 
+                       filename: str = None) -> str:
+        """
+        Generate comprehensive analysis report.
+        
+        Parameters:
+        -----------
+        data : np.ndarray
+            Data to analyze
+        filename : str
+            If provided, saves report to file
+            
+        Returns:
+        --------
+        report : str
+            Formatted analysis report
+        """
+        analysis = self.comprehensive_analysis(data)
+        
+        report = []
+        report.append("=" * 70)
+        report.append("UNIVERSAL PATTERN RECOGNITION FRAMEWORK - ANALYSIS REPORT")
+        report.append("=" * 70)
+        report.append(f"\nData Shape: {analysis['data_shape']}")
+        report.append(f"Data Type: {analysis['data_type']}")
+        report.append(f"Timestamp: {analysis['timestamp']}")
+        report.append("\n" + "-" * 70)
+        
+        # Fractal Analysis
+        if 'fractal' in analysis and 'dimension' in analysis['fractal']:
+            report.append("\nFRACTAL ANALYSIS:")
+            report.append(f"  Fractal Dimension: {analysis['fractal']['dimension']:.4f}")
+            report.append(f"  Interpretation: " + 
+                         ("High complexity" if analysis['fractal']['dimension'] > 1.5 
+                          else "Low complexity"))
+        
+        # Phase Transitions
+        if 'phase_transitions' in analysis and 'n_transitions' in analysis['phase_transitions']:
+            report.append("\nPHASE TRANSITION ANALYSIS:")
+            report.append(f"  Number of Transitions: {analysis['phase_transitions']['n_transitions']}")
+            if analysis['phase_transitions']['n_transitions'] > 0:
+                report.append(f"  Transition Points: {analysis['phase_transitions']['transitions']}")
+        
+        # Entropy
+        if 'entropy' in analysis and 'shannon_entropy' in analysis['entropy']:
+            report.append("\nENTROPY ANALYSIS:")
+            report.append(f"  Shannon Entropy: {analysis['entropy']['shannon_entropy']:.4f} bits")
+            report.append(f"  Approximate Entropy: {analysis['entropy']['approximate_entropy']:.4f}")
+            report.append(f"  Standard Deviation: {analysis['entropy']['std_deviation']:.4f}")
+        
+        # Golden Ratio
+        if 'golden_ratio' in analysis and 'contains_golden_ratio' in analysis['golden_ratio']:
+            report.append("\nGOLDEN RATIO ANALYSIS:")
+            report.append(f"  Contains Golden Ratio: {analysis['golden_ratio']['contains_golden_ratio']}")
+            report.append(f"  Match Rate: {analysis['golden_ratio']['match_rate']:.2%}")
+            report.append(f"  Average Ratio: {analysis['golden_ratio']['average_ratio']:.4f}")
+        
+        # Complexity
+        if 'complexity' in analysis and 'lempel_ziv_complexity' in analysis['complexity']:
+            report.append("\nCOMPLEXITY MEASURES:")
+            report.append(f"  Lempel-Ziv Complexity: {analysis['complexity']['lempel_ziv_complexity']}")
+            if not np.isnan(analysis['complexity']['fractal_dimension']):
+                report.append(f"  Fractal Dimension: {analysis['complexity']['fractal_dimension']:.4f}")
+            report.append(f"  Autocorrelation Length: {analysis['complexity']['autocorrelation_length']}")
+        
+        # Periodic Patterns
+        if 'periodic_patterns' in analysis and 'frequencies' in analysis['periodic_patterns']:
+            report.append("\nPERIODIC PATTERNS:")
+            freqs = analysis['periodic_patterns']['frequencies']
+            if len(freqs) > 0:
+                report.append(f"  Dominant Frequencies: {freqs[:3]}")
+                periods = analysis['periodic_patterns']['periods']
+                report.append(f"  Dominant Periods: {periods[:3]}")
+            else:
+                report.append("  No significant periodic patterns detected")
+        
+        report.append("\n" + "=" * 70)
+        
+        report_text = "\n".join(report)
+        
+        if filename:
+            with open(filename, 'w') as f:
+                f.write(report_text)
+        
+        return report_text
+
+
+# ============================================================================
+# SECTION 8: VISUALIZATION TOOLS
+# ============================================================================
+
+class Visualizer:
+    """
+    Visualization tools for pattern analysis results.
+    """
+    
+    @staticmethod
+    def plot_fractal_dimension(box_sizes: np.ndarray, 
+                              counts: np.ndarray,
+                              dimension: float,
+                              title: str = "Fractal Dimension Analysis"):
+        """
+        Plot box-counting results.
+        """
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        ax.loglog(box_sizes, counts, 'o-', label='Data')
+        
+        # Fit line
+        coeffs = np.polyfit(np.log(box_sizes), np.log(counts), 1)
+        fit_line = np.exp(coeffs[1]) * box_sizes**coeffs[0]
+        ax.loglog(box_sizes, fit_line, '--', label=f'Fit (D={dimension:.3f})')
+        
+        ax.set_xlabel('Box Size (ε)')
+        ax.set_ylabel('Number of Boxes N(ε)')
+        ax.set_title(title)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        return fig
+    
+    @staticmethod
+    def plot_phase_transition(time_series: np.ndarray,
+                             order_parameter: np.ndarray,
+                             transitions: np.ndarray,
+                             title: str = "Phase Transition Detection"):
+        """
+        Plot phase transition detection results.
+        """
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+        
+        # Original time series
+        ax1.plot(time_series, linewidth=0.5)
+        for trans in transitions:
+            ax1.axvline(trans, color='red', alpha=0.5, linestyle='--')
+        ax1.set_xlabel('Time')
+        ax1.set_ylabel('Observable')
+        ax1.set_title('Time Series with Detected Transitions')
+        ax1.grid(True, alpha=0.3)
+        
+        # Order parameter
+        ax2.plot(order_parameter)
+        for trans in transitions:
+            ax2.axvline(trans, color='red', alpha=0.5, linestyle='--')
+        ax2.set_xlabel('Time')
+        ax2.set_ylabel('Order Parameter (Variance)')
+        ax2.set_title('Order Parameter Evolution')
+        ax2.grid(True, alpha=0.3)
+        
+        fig.suptitle(title, fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        
+        return fig
+    
+    @staticmethod
+    def plot_wave_interference(pattern: np.ndarray,
+                              X: np.ndarray,
+                              T: np.ndarray,
+                              title: str = "Wave Interference Pattern"):
+        """
+        Plot wave interference pattern.
+        """
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        im = ax.contourf(X, T, pattern, levels=50, cmap='RdBu_r')
+        ax.set_xlabel('Space (x)')
+        ax.set_ylabel('Time (t)')
+        ax.set_title(title)
+        plt.colorbar(im, ax=ax, label='Amplitude')
+        
+        return fig
+    
+    @staticmethod
+    def plot_golden_spiral(x: np.ndarray, 
+                          y: np.ndarray,
+                          title: str = "Golden Spiral"):
+        """
+        Plot golden spiral.
+        """
+        fig, ax = plt.subplots(figsize=(8, 8))
+        
+        ax.plot(x, y, linewidth=2)
+        ax.set_aspect('equal')
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        
+        return fig
+    
+    @staticmethod
+    def plot_fractal_tree(points: np.ndarray, 
+                         connections: List,
+                         title: str = "Fractal Branching Pattern"):
+        """
+        Plot fractal tree structure.
+        """
+        fig, ax = plt.subplots(figsize=(10, 10))
+        
+        # Draw connections
+        for parent, child in connections:
+            x_vals = [points[parent, 0], points[child, 0]]
+            y_vals = [points[parent, 1], points[child, 1]]
+            ax.plot(x_vals, y_vals, 'b-', linewidth=1, alpha=0.6)
+        
+        # Draw points
+        ax.scatter(points[:, 0], points[:, 1], c='green', s=10, zorder=5)
+        
+        ax.set_aspect('equal')
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        
+        return fig
+    
+    @staticmethod
+    def plot_power_spectrum(frequencies: np.ndarray,
+                           power: np.ndarray,
+                           dominant_freqs: np.ndarray = None,
+                           title: str = "Power Spectrum"):
+        """
+        Plot frequency power spectrum.
+        """
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        ax.semilogy(frequencies, power, linewidth=1)
+        
+        if dominant_freqs is not None and len(dominant_freqs) > 0:
+            for freq in dominant_freqs[:5]:  # Top 5
+                idx = np.argmin(np.abs(frequencies - freq))
+                ax.plot(freq, power[idx], 'ro', markersize=8)
+        
+        ax.set_xlabel('Frequency')
+        ax.set_ylabel('Power')
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        
+        return fig
+
+
+# ============================================================================
+# SECTION 9: EXAMPLE WORKFLOWS AND DEMONSTRATIONS
+# ============================================================================
+
+class ExampleWorkflows:
+    """
+    Demonstration workflows for common research tasks.
+    """
+    
+    @staticmethod
+    def cosmic_web_analysis(n_galaxies: int = 1000):
+        """
+        Simulate and analyze cosmic web-like structure.
+        """
+        print("=" * 70)
+        print("COSMIC WEB STRUCTURE ANALYSIS")
+        print("=" * 70)
+        
+        # Generate random galaxy positions with clustering
+        np.random.seed(42)
+        centers = np.random.rand(10, 3) * 100
+        galaxies = []
+        
+        for center in centers:
+            cluster = center + np.random.randn(n_galaxies//10, 3) * 5
+            galaxies.append(cluster)
+        
+        galaxies = np.vstack(galaxies)
+        
+        # Fractal analysis
+        print("\n1. Fractal Dimension Analysis...")
+        D, box_sizes, counts = FractalAnalyzer.box_counting_dimension(
+            galaxies, min_box_size=1, max_box_size=50
+        )
+        print(f"   Fractal Dimension: {D:.4f}")
+        print(f"   Expected range for cosmic web: 2.0-2.5")
+        print(f"   Result: {'✓ Within expected range' if 2.0 <= D <= 2.5 else '✗ Outside range'}")
+        
+        # Correlation dimension
+        print("\n2. Correlation Dimension Analysis...")
+        D_corr, scales, corr = FractalAnalyzer.correlation_dimension(galaxies)
+        print(f"   Correlation Dimension: {D_corr:.4f}")
+        
+        return {
+            'galaxies': galaxies,
+            'fractal_dimension': D,
+            'correlation_dimension': D_corr,
+            'box_sizes': box_sizes,
+            'counts': counts
+        }
+    
+    @staticmethod
+    def neural_network_topology():
+        """
+        Analyze neural network connectivity patterns.
+        """
+        print("\n" + "=" * 70)
+        print("NEURAL NETWORK TOPOLOGY ANALYSIS")
+        print("=" * 70)
+        
+        # Generate small-world network (mimicking brain connectivity)
+        n_nodes = 500
+        
+        # Create structured connectivity
+        adjacency = np.zeros((n_nodes, n_nodes))
+        
+        # Local connections
+        for i in range(n_nodes):
+            for j in range(max(0, i-5), min(n_nodes, i+6)):
+                if i != j:
+                    adjacency[i, j] = np.random.rand() > 0.7
+        
+        # Long-range connections (small-world property)
+        n_long_range = n_nodes * 2
+        for _ in range(n_long_range):
+            i, j = np.random.randint(0, n_nodes, 2)
+            adjacency[i, j] = 1
+        
+        # Analyze degree distribution
+        degrees = np.sum(adjacency, axis=1)
+        
+        print("\n1. Degree Distribution Analysis...")
+        print(f"   Mean degree: {np.mean(degrees):.2f}")
+        print(f"   Std deviation: {np.std(degrees):.2f}")
+        
+        # Check for scale-free property
+        hist, bins = np.histogram(degrees, bins=20)
+        bin_centers = (bins[:-1] + bins[1:]) / 2
+        
+        # Power law fit
+        mask = (hist > 0) & (bin_centers > 0)
+        if np.sum(mask) > 3:
+            coeffs = np.polyfit(np.log(bin_centers[mask]), 
+                              np.log(hist[mask]), 1)
+            exponent = coeffs[0]
+            print(f"   Power law exponent: {exponent:.4f}")
+            print(f"   Expected for scale-free: -2 to -3")
+        
+        # Clustering coefficient
+        print("\n2. Network Properties...")
+        clustering_coeffs = []
+        for i in range(n_nodes):
+            neighbors = np.where(adjacency[i] > 0)[0]
+            if len(neighbors) < 2:
+                continue
+            connections = 0
+            for j in neighbors:
+                for k in neighbors:
+                    if j < k and adjacency[j, k] > 0:
+                        connections += 1
+            possible = len(neighbors) * (len(neighbors) - 1) / 2
+            clustering_coeffs.append(connections / possible if possible > 0 else 0)
+        
+        avg_clustering = np.mean(clustering_coeffs)
+        print(f"   Average clustering coefficient: {avg_clustering:.4f}")
+        print(f"   High clustering suggests small-world property")
+        
+        return {
+            'adjacency': adjacency,
+            'degrees': degrees,
+            'clustering_coefficient': avg_clustering
+        }
+    
+    @staticmethod
+    def learning_optimization():
+        """
+        Demonstrate optimal learning schedule using golden ratio.
+        """
+        print("\n" + "=" * 70)
+        print("OPTIMAL LEARNING SCHEDULE ANALYSIS")
+        print("=" * 70)
+        
+        total_time = 30  # days
+        n_sessions = 10
+        
+        # Golden ratio spacing
+        golden_schedule = GoldenRatioAnalyzer.optimal_spacing(
+            total_time, n_sessions, use_golden_ratio=True
+        )
+        
+        # Linear spacing (for comparison)
+        linear_schedule = GoldenRatioAnalyzer.optimal_spacing(
+            total_time, n_sessions, use_golden_ratio=False
+        )
+        
+        print("\n1. Learning Schedule Comparison:")
+        print("\n   Golden Ratio Spacing (days):")
+        print(f"   {golden_schedule}")
+        print("\n   Linear Spacing (days):")
+        print(f"   {linear_schedule}")
+        
+        # Simulate retention
+        def retention_curve(t, spacing):
+            """Simplified Ebbinghaus forgetting curve"""
+            retention = 0
+            for session in spacing:
+                if t >= session:
+                    time_since = t - session
+                    retention += np.exp(-time_since / 7)  # 7-day half-life
+            return retention
+        
+        times = np.linspace(0, total_time, 300)
+        retention_golden = [retention_curve(t, golden_schedule) for t in times]
+        retention_linear = [retention_curve(t, linear_schedule) for t in times]
+        
+        avg_retention_golden = np.mean(retention_golden)
+        avg_retention_linear = np.mean(retention_linear)
+        
+        print("\n2. Retention Analysis:")
+        print(f"   Average retention (golden): {avg_retention_golden:.4f}")
+        print(f"   Average retention (linear): {avg_retention_linear:.4f}")
+        print(f"   Improvement: {(avg_retention_golden/avg_retention_linear - 1)*100:.2f}%")
+        
+        return {
+            'golden_schedule': golden_schedule,
+            'linear_schedule': linear_schedule,
+            'times': times,
+            'retention_golden': retention_golden,
+            'retention_linear': retention_linear
+        }
+    
+    @staticmethod
+    def ecosystem_tipping_point():
+        """
+        Simulate and detect ecosystem phase transition.
+        """
+        print("\n" + "=" * 70)
+        print("ECOSYSTEM TIPPING POINT ANALYSIS")
+        print("=" * 70)
+        
+        # Simulate ecosystem with critical transition
+        np.random.seed(42)
+        time_steps = 1000
+        stress_param = np.linspace(0, 2, time_steps)  # Environmental stress
+        
+        # Population dynamics with bistability
+        population = np.zeros(time_steps)
+        population[0] = 100
+        
+        for t in range(1, time_steps):
+            theta = stress_param[t]
+            pop = population[t-1]
+            
+            # Logistic growth with stress-dependent collapse
+            if theta < 1.0:
+                # Stable regime
+                dpop = 0.1 * pop * (1 - pop/100) - 0.01 * theta * pop
+            else:
+                # Approaching critical point
+                dpop = 0.1 * pop * (1 - pop/100) - 0.05 * (theta - 1)**2 * pop
+            
+            population[t] = max(0, pop + dpop + np.random.randn() * 2)
+        
+        # Detect transition
+        print("\n1. Phase Transition Detection...")
+        transitions, order_param = PhaseTransitionAnalyzer.detect_transitions(
+            population, window_size=50
+        )
+        
+        print(f"   Number of transitions detected: {len(transitions)}")
+        if len(transitions) > 0:
+            critical_idx = transitions[0]
+            critical_stress = stress_param[critical_idx]
+            print(f"   First critical point at: t={critical_idx}, stress={critical_stress:.4f}")
+        
+        # Find critical point using susceptibility
+        critical_info = PhaseTransitionAnalyzer.find_critical_point(
+            population, stress_param
+        )
+        
+        print("\n2. Critical Point Analysis:")
+        print(f"   Critical stress parameter: {critical_info['critical_control_value']:.4f}")
+        print(f"   Population at critical point: {critical_info['critical_order_value']:.2f}")
+        print(f"   Maximum susceptibility: {critical_info['max_susceptibility']:.4f}")
+        
+        return {
+            'time': np.arange(time_steps),
+            'stress': stress_param,
+            'population': population,
+            'transitions': transitions,
+            'critical_info': critical_info
+        }
+
+
+# ============================================================================
+# SECTION 10: MAIN RESEARCH INTERFACE
+# ============================================================================
+
+class ResearchFramework:
+    """
+    Main interface for conducting research with the framework.
+    """
+    
+    def __init__(self):
+        self.ukf = UniversalKnowledgeFramework()
+        self.viz = Visualizer()
+        self.examples = ExampleWorkflows()
+        
+        print("Universal Pattern Recognition Framework Initialized")
+        print("Version 1.0.0")
+        print("=" * 70)
+    
+    def run_demo(self, demo_name: str = 'all'):
+        """
+        Run demonstration analyses.
+        
+        Parameters:
+        -----------
+        demo_name : str
+            Which demo to run ('cosmic', 'neural', 'learning', 'ecosystem', 'all')
+        """
+        demos = {
+            'cosmic': self.examples.cosmic_web_analysis,
+            'neural': self.examples.neural_network_topology,
+            'learning': self.examples.learning_optimization,
+            'ecosystem': self.examples.ecosystem_tipping_point
+        }
+        
+        if demo_name == 'all':
+            results = {}
+            for name, func in demos.items():
+                results[name] = func()
+            return results
+        elif demo_name in demos:
+            return demos[demo_name]()
+        else:
+            print(f"Unknown demo: {demo_name}")
+            print(f"Available: {list(demos.keys
+
+()) + ['all']}")
+return None
+def analyze_custom_data(self, data: np.ndarray, 
+                       data_name: str = "Custom Data",
+                       generate_plots: bool = True) -> Dict:
+    """
+    Analyze custom data using the full framework.
+    
+    Parameters:
+    -----------
+    data : np.ndarray
+        Input data to analyze
+    data_name : str
+        Name for labeling results
+    generate_plots : bool
+        Whether to generate visualization plots
+        
+    Returns:
+    --------
+    results : dict
+        Complete analysis results with optional plots
+    """
+    print(f"\n{'=' * 70}")
+    print(f"ANALYZING: {data_name}")
+    print(f"{'=' * 70}")
+    
+    # Comprehensive analysis
+    print("\nRunning comprehensive analysis...")
+    results = self.ukf.comprehensive_analysis(data)
+    
+    # Generate report
+    print("\nGenerating report...")
+    report = self.ukf.generate_report(data)
+    print(report)
+    
+    results['report'] = report
+    
+    # Generate plots if requested
+    if generate_plots:
+        print("\nGenerating visualizations...")
+        results['plots'] = {}
+        
+        # Fractal dimension plot
+        if 'fractal' in results and 'box_sizes' in results['fractal']:
+            try:
+                fig = self.viz.plot_fractal_dimension(
+                    results['fractal']['box_sizes'],
+                    results['fractal']['counts'],
+                    results['fractal']['dimension'],
+                    title=f"Fractal Analysis: {data_name}"
+                )
+                results['plots']['fractal'] = fig
+                print("  ✓ Fractal dimension plot created")
+            except Exception as e:
+                print(f"  ✗ Fractal plot error: {e}")
+        
+        # Phase transition plot
+        if 'phase_transitions' in results and 'order_parameter' in results['phase_transitions']:
+            try:
+                fig = self.viz.plot_phase_transition(
+                    data.flatten(),
+                    results['phase_transitions']['order_parameter'],
+                    results['phase_transitions']['transitions'],
+                    title=f"Phase Transitions: {data_name}"
+                )
+                results['plots']['phase_transition'] = fig
+                print("  ✓ Phase transition plot created")
+            except Exception as e:
+                print(f"  ✗ Phase transition plot error: {e}")
+        
+        # Power spectrum plot
+        if 'periodic_patterns' in results and 'full_spectrum' in results['periodic_patterns']:
+            try:
+                spectrum = results['periodic_patterns']['full_spectrum']
+                dominant = results['periodic_patterns']['frequencies']
+                fig = self.viz.plot_power_spectrum(
+                    spectrum['freqs'],
+                    spectrum['power'],
+                    dominant,
+                    title=f"Power Spectrum: {data_name}"
+                )
+                results['plots']['power_spectrum'] = fig
+                print("  ✓ Power spectrum plot created")
+            except Exception as e:
+                print(f"  ✗ Power spectrum plot error: {e}")
+    
+    return results
+
+def compare_datasets(self, data1: np.ndarray, 
+                    data2: np.ndarray,
+                    name1: str = "Dataset 1",
+                    name2: str = "Dataset 2") -> Dict:
+    """
+    Compare two datasets across multiple dimensions.
+    
+    Parameters:
+    -----------
+    data1, data2 : np.ndarray
+        Datasets to compare
+    name1, name2 : str
+        Names for labeling
+        
+    Returns:
+    --------
+    comparison : dict
+        Detailed comparison results
+    """
+    print(f"\n{'=' * 70}")
+    print(f"COMPARING: {name1} vs {name2}")
+    print(f"{'=' * 70}")
+    
+    # Individual analyses
+    print(f"\nAnalyzing {name1}...")
+    analysis1 = self.ukf.comprehensive_analysis(data1)
+    
+    print(f"\nAnalyzing {name2}...")
+    analysis2 = self.ukf.comprehensive_analysis(data2)
+    
+    # Direct comparison
+    print("\nPerforming comparative analysis...")
+    comparison = self.ukf.compare_patterns(data1, data2)
+    
+    # Summary
+    print("\n" + "-" * 70)
+    print("COMPARISON SUMMARY")
+    print("-" * 70)
+    
+    # Correlation
+    if 'correlation' in comparison and 'pearson_correlation' in comparison['correlation']:
+        corr = comparison['correlation']['pearson_correlation']
+        print(f"\nPearson Correlation: {corr:.4f}")
+        if abs(corr) > 0.7:
+            print("  → Strong correlation")
+        elif abs(corr) > 0.4:
+            print("  → Moderate correlation")
+        else:
+            print("  → Weak correlation")
+    
+    # Mutual information
+    if 'mutual_information' in comparison:
+        mi = comparison['mutual_information']
+        print(f"\nMutual Information: {mi:.4f} bits")
+        print("  → Measures shared information content")
+    
+    # Complexity comparison
+    if 'complexity_difference' in comparison:
+        comp_diff = comparison['complexity_difference']
+        if 'pattern1' in comp_diff and 'pattern2' in comp_diff:
+            e1 = comp_diff['pattern1']['shannon_entropy']
+            e2 = comp_diff['pattern2']['shannon_entropy']
+            print(f"\nEntropy Comparison:")
+            print(f"  {name1}: {e1:.4f} bits")
+            print(f"  {name2}: {e2:.4f} bits")
+            print(f"  Difference: {abs(e1 - e2):.4f} bits")
+    
+    return {
+        'analysis1': analysis1,
+        'analysis2': analysis2,
+        'comparison': comparison
+    }
+
+def save_results(self, results: Dict, 
+                output_dir: str = "./results",
+                save_plots: bool = True):
+    """
+    Save analysis results to files.
+    
+    Parameters:
+    -----------
+    results : dict
+        Analysis results dictionary
+    output_dir : str
+        Directory to save results
+    save_plots : bool
+        Whether to save plot figures
+    """
+    import os
+    import json
+    from datetime import datetime
+    
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Save report
+    if 'report' in results:
+        report_file = os.path.join(output_dir, f"report_{timestamp}.txt")
+        with open(report_file, 'w') as f:
+            f.write(results['report'])
+        print(f"\n✓ Report saved: {report_file}")
+    
+    # Save numerical results
+    # Convert numpy arrays to lists for JSON serialization
+    def convert_for_json(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, dict):
+            return {k: convert_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_for_json(item) for item in obj]
+        else:
+            return obj
+    
+    # Filter out non-serializable items
+    serializable_results = {}
+    for key, value in results.items():
+        if key != 'plots':  # Skip plot objects
+            try:
+                serializable_results[key] = convert_for_json(value)
+            except:
+                pass
+    
+    results_file = os.path.join(output_dir, f"results_{timestamp}.json")
+    with open(results_file, 'w') as f:
+        json.dump(serializable_results, f, indent=2)
+    print(f"✓ Results saved: {results_file}")
+    
+    # Save plots
+    if save_plots and 'plots' in results:
+        plots_dir = os.path.join(output_dir, f"plots_{timestamp}")
+        os.makedirs(plots_dir, exist_ok=True)
+        
+        for plot_name, fig in results['plots'].items():
+            plot_file = os.path.join(plots_dir, f"{plot_name}.png")
+            fig.savefig(plot_file, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+        
+        print(f"✓ Plots saved: {plots_dir}")
+    
+    print(f"\nAll results saved to: {output_dir}")
+============================================================================
+SECTION 11: UTILITY FUNCTIONS
+============================================================================
+def generate_test_data(data_type: str = 'timeseries',
+length: int = 1000) -> np.ndarray:
+"""
+Generate synthetic test data for demonstrations.
+Parameters:
+-----------
+data_type : str
+    Type of data ('timeseries', 'fractal', 'phase_transition', 'periodic')
+length : int
+    Length of data
+    
+Returns:
+--------
+data : np.ndarray
+    Generated test data
+"""
+np.random.seed(42)
+
+if data_type == 'timeseries':
+    # Simple time series with trend and noise
+    t = np.linspace(0, 10, length)
+    data = np.sin(2*np.pi*t) + 0.5*np.sin(4*np.pi*t) + 0.1*np.random.randn(length)
+
+elif data_type == 'fractal':
+    # Fractal point cloud
+    points, _ = FractalAnalyzer.generate_fractal_pattern(
+        iterations=6, branching_factor=2
+    )
+    data = points
+
+elif data_type == 'phase_transition':
+    # Data with phase transition
+    data = PhaseTransitionAnalyzer.simulate_phase_transition(
+        np.linspace(-1, 1, length), theta_c=0.0
+    )
+
+elif data_type == 'periodic':
+    # Multi-frequency periodic signal
+    t = np.linspace(0, 10, length)
+    data = (np.sin(2*np.pi*1.5*t) + 
+            0.5*np.sin(2*np.pi*3.7*t) + 
+            0.3*np.sin(2*np.pi*7.2*t) + 
+            0.1*np.random.randn(length))
+
+else:
+    # Default random walk
+    data = np.cumsum(np.random.randn(length))
+
+return data
+def quick_analysis(data: np.ndarray, show_plots: bool = True) -> Dict:
+"""
+Quick analysis function for immediate results.
+Parameters:
+-----------
+data : np.ndarray
+    Input data
+show_plots : bool
+    Whether to display plots
+    
+Returns:
+--------
+results : dict
+    Analysis results
+"""
+framework = ResearchFramework()
+results = framework.analyze_custom_data(data, generate_plots=show_plots)
+
+if show_plots and 'plots' in results:
+    for name, fig in results['plots'].items():
+        plt.figure(fig.number)
+        plt.show()
+
+return results
+============================================================================
+SECTION 12: COMMAND LINE INTERFACE
+============================================================================
+def main():
+"""
+Main entry point for command-line usage.
+"""
+import sys
+print("\n" + "=" * 70)
+print("UNIVERSAL PATTERN RECOGNITION FRAMEWORK")
+print("Research Tool for Pattern Analysis Across Scales")
+print("=" * 70 + "\n")
+
+if len(sys.argv) > 1:
+    command = sys.argv[1]
+    
+    if command == 'demo':
+        # Run demonstrations
+        demo_type = sys.argv[2] if len(sys.argv) > 2 else 'all'
+        framework = ResearchFramework()
+        framework.run_demo(demo_type)
+    
+    elif command == 'analyze':
+        # Analyze data from file
+        if len(sys.argv) < 3:
+            print("Usage: python framework.py analyze <data_file>")
+            return
+        
+        filename = sys.argv[2]
+        try:
+            data = np.loadtxt(filename)
+            framework = ResearchFramework()
+            results = framework.analyze_custom_data(data, data_name=filename)
+            
+            # Save results
+            if len(sys.argv) > 3 and sys.argv[3] == '--save':
+                framework.save_results(results)
+            
+        except Exception as e:
+            print(f"Error loading file: {e}")
+    
+    elif command == 'generate':
+        # Generate test data
+        data_type = sys.argv[2] if len(sys.argv) > 2 else 'timeseries'
+        data = generate_test_data(data_type)
+        
+        output_file = f"test_data_{data_type}.txt"
+        np.savetxt(output_file, data)
+        print(f"Test data generated: {output_file}")
+    
+    elif command == 'help':
+        print_help()
+    
+    else:
+        print(f"Unknown command: {command}")
+        print_help()
+
+else:
+    # Interactive mode
+    interactive_mode()
+def print_help():
+"""Print help information."""
+help_text = """
+USAGE:
+python framework.py  [options]
+COMMANDS:
+demo [type]              Run demonstration analyses
+Types: cosmic, neural, learning, ecosystem, all
+analyze <file> [--save]  Analyze data from file
+                        File format: plain text, one value per line
+
+generate <type>          Generate test data
+                        Types: timeseries, fractal, phase_transition, periodic
+
+help                     Show this help message
+EXAMPLES:
+python framework.py demo all
+python framework.py analyze mydata.txt --save
+python framework.py generate fractal
+PYTHON API:
+from framework import ResearchFramework, quick_analysis
+# Quick analysis
+import numpy as np
+data = np.random.randn(1000)
+results = quick_analysis(data)
+
+# Full framework
+framework = ResearchFramework()
+results = framework.analyze_custom_data(data)
+framework.save_results(results)
+"""
+print(help_text)
+def interactive_mode():
+"""Interactive mode for exploring the framework."""
+print("INTERACTIVE MODE")
+print("=" * 70)
+print("\nAvailable options:")
+print("1. Run demonstrations")
+print("2. Analyze sample data")
+print("3. Generate fractal pattern")
+print("4. Wave interference simulation")
+print("5. Exit")
+try:
+    choice = input("\nSelect option (1-5): ").strip()
+    
+    framework = ResearchFramework()
+    
+    if choice == '1':
+        print("\nAvailable demos: cosmic, neural, learning, ecosystem, all")
+        demo = input("Select demo: ").strip()
+        framework.run_demo(demo)
+    
+    elif choice == '2':
+        print("\nGenerating sample time series...")
+        data = generate_test_data('timeseries', 1000)
+        results = framework.analyze_custom_data(data, "Sample Time Series")
+    
+    elif choice == '3':
+        print("\nGenerating fractal tree...")
+        points, connections = FractalAnalyzer.generate_fractal_pattern(
+            iterations=6, branching_factor=2
+        )
+        fig = Visualizer.plot_fractal_tree(points, connections)
+        plt.show()
+    
+    elif choice == '4':
+        print("\nSimulating wave interference...")
+        sources = [
+            {'A': 1.0, 'k': 1.0, 'omega': 1.0, 'phi': 0.0, 'position': -3},
+            {'A': 1.0, 'k': 1.0, 'omega': 1.0, 'phi': 0.0, 'position': 3}
+        ]
+        pattern, X, T = WaveAnalyzer.interference_pattern(sources)
+        fig = Visualizer.plot_wave_interference(pattern, X, T)
+        plt.show()
+    
+    elif choice == '5':
+        print("\nExiting...")
+        return
+    
+    else:
+        print("\nInvalid option")
+
+except KeyboardInterrupt:
+    print("\n\nExiting...")
+except Exception as e:
+    print(f"\nError: {e}")
+============================================================================
+SECTION 13: DOCUMENTATION AND EXAMPLES
+============================================================================
+"""
+EXAMPLE USAGE SCENARIOS
+COSMIC STRUCTURE ANALYSIS
+from framework import ResearchFramework
+import numpy as np
+Load galaxy position data
+galaxies = np.loadtxt('galaxy_positions.txt')
+Analyze
+framework = ResearchFramework()
+results = framework.analyze_custom_data(galaxies, "Galaxy Distribution")
+Extract fractal dimension
+D = results['fractal']['dimension']
+print(f"Cosmic web fractal dimension: {D}")
+NEURAL DATA ANALYSIS
+Load neural time series
+neural_data = np.loadtxt('neural_recording.txt')
+Detect phase transitions (state changes)
+results = framework.analyze_custom_data(neural_data, "Neural Recording")
+Identify critical transitions
+transitions = results['phase_transitions']['transitions']
+print(f"State transitions at: {transitions}")
+LEARNING OPTIMIZATION
+from framework import GoldenRatioAnalyzer
+Create optimal study schedule
+total_days = 30
+n_sessions = 10
+schedule = GoldenRatioAnalyzer.optimal_spacing(
+total_days, n_sessions, use_golden_ratio=True
+)
+print(f"Study on days: {schedule}")
+PATTERN COMPARISON
+Compare two datasets
+data1 = np.loadtxt('experiment1.txt')
+data2 = np.loadtxt('experiment2.txt')
+comparison = framework.compare_datasets(data1, data2,
+"Experiment 1", "Experiment 2")
+Check similarity
+correlation = comparison['comparison']['correlation']['pearson_correlation']
+print(f"Datasets correlation: {correlation}")
+CUSTOM PIPELINE
+from framework import (FractalAnalyzer, PhaseTransitionAnalyzer,
+WaveAnalyzer, EntropyAnalyzer)
+Multi-step analysis
+data = np.loadtxt('mydata.txt')
+Step 1: Fractal analysis
+D, _, _ = FractalAnalyzer.box_counting_dimension(
+np.column_stack([np.arange(len(data)), data])
+)
+Step 2: Entropy
+entropy = EntropyAnalyzer.shannon_entropy(data)
+Step 3: Phase transitions
+transitions, _ = PhaseTransitionAnalyzer.detect_transitions(data)
+Step 4: Periodic patterns
+patterns = PatternRecognizer.extract_periodic_patterns(data)
+print(f"Fractal Dim: {D}, Entropy: {entropy}, Transitions: {len(transitions)}")
+"""
+============================================================================
+EXECUTION
+============================================================================
+if name == "main":
+main()
+**END OF FILE**
+
+---
+
+## How to Use This Research Code
+
+### Installation
+```bash
+# Required packages
+pip install numpy scipy matplotlib
+Quick Start
+# Import the framework
+from framework import ResearchFramework, quick_analysis, generate_test_data
+import numpy as np
+
+# Option 1: Quick analysis
+data = generate_test_data('timeseries', 1000)
+results = quick_analysis(data)
+
+# Option 2: Full framework
+framework = ResearchFramework()
+
+# Run demonstrations
+framework.run_demo('cosmic')  # Cosmic web analysis
+framework.run_demo('neural')  # Neural network topology
+framework.run_demo('learning')  # Optimal learning schedule
+framework.run_demo('ecosystem')  # Ecosystem tipping point
+
+# Analyze custom data
+your_data = np.loadtxt('your_data.txt')
+results = framework.analyze_custom_data(your_data, "Your Data")
+
+# Save results
+framework.save_results(results, output_dir="./my_results")
+Command Line Usage
+# Run all demos
+python framework.py demo all
+
+# Analyze a data file
+python framework.py analyze data.txt --save
+
+# Generate test data
+python framework.py generate fractal
+
+# Interactive mode
+python framework.py
+Key Features
+Fractal Analysis: Box-counting, correlation dimension, self-similarity detection
+Phase Transitions: Critical point detection, order parameter analysis
+Wave Interference: Resonance detection, constructive interference analysis
+Entropy Dynamics: Shannon entropy, mutual information, complexity measures
+Golden Ratio: Fibonacci patterns, optimal spacing, spiral generation
+Pattern Recognition: Multi-scale analysis, correlation, periodicity detection
+For NASA AWG & Copernicus Contributions
+This framework provides computational tools for:
+Analyzing cosmic structure formation and fractal dimensions
+Detecting phase transitions in climate/ecological systems
+Pattern recognition in satellite imagery
+Multi-scale analysis of Earth observation data
+Information integration across sensor networks
+Save this code as universal_pattern_framework.py and use it as your research repository foundation!
+
