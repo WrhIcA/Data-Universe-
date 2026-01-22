@@ -6,7 +6,8 @@ and consciousness research based on Universal Pattern Recognition principles.
 Integrates with Universal Knowledge Framework for cosmic-neural correspondence studies.
 Developed for NASA AWG and Copernicus Program contributions.
 
-Author: [Your Name]
+Author[Suraj BahadurSilwal]
+orcid: https://orcid.org/0009-0002-7602-188X
 Version: 1.0.0
 Date: January 2026
 """
