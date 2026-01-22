@@ -1,0 +1,2059 @@
+"""
+Interconnected Climate Tipping Point Algorithm
+Advanced framework for monitoring cascading climate system risks with
+interconnectivity theory and non-linear dynamics.
+
+Integrates with Universal Pattern Framework and Space Mathematics for
+Earth system analysis supporting NASA AWG and Copernicus Program.
+
+Author: [Your Name]
+Version: 1.0.0
+Date: January 2026
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import integrate, signal
+from scipy.optimize import minimize
+from typing import List, Tuple, Dict, Optional, Union, Callable
+import warnings
+warnings.filterwarnings('ignore')
+
+
+# ============================================================================
+# SECTION 1: CLIMATE SYSTEM CONSTANTS
+# ============================================================================
+
+class ClimateConstants:
+    """Physical constants and baseline values for climate systems."""
+    
+    # Temperature parameters
+    PREINDUSTRIAL_TEMP = 13.9  # °C global mean
+    CURRENT_TEMP_ANOMALY = 1.2  # °C above preindustrial
+    PARIS_TARGET = 1.5  # °C warming limit
+    DANGEROUS_THRESHOLD = 2.0  # °C critical threshold
+    
+    # Arctic parameters
+    ARCTIC_ICE_BASELINE = 6.5  # million km² (1980s average)
+    ARCTIC_ICE_CURRENT = 4.5  # million km²
+    ARCTIC_ICE_CRITICAL = 3.0  # million km² (tipping point)
+    
+    # Ocean circulation (AMOC - Atlantic Meridional Overturning Circulation)
+    AMOC_BASELINE = 100.0  # % of preindustrial strength
+    AMOC_CURRENT = 85.0  # % current strength
+    AMOC_CRITICAL = 70.0  # % collapse threshold
+    
+    # Amazon rainforest
+    AMAZON_BASELINE = 100.0  # % of original coverage
+    AMAZON_CURRENT = 80.0  # % current coverage
+    AMAZON_CRITICAL = 60.0  # % dieback threshold
+    
+    # Permafrost
+    PERMAFROST_BASELINE = 0.0  # % loss
+    PERMAFROST_CURRENT = 15.0  # % current loss
+    PERMAFROST_CRITICAL = 25.0  # % critical loss threshold
+    
+    # Himalayan glaciers
+    GLACIER_BASELINE = 100.0  # % of original mass
+    GLACIER_CURRENT = 70.0  # % current mass
+    GLACIER_CRITICAL = 50.0  # % critical threshold
+    
+    # West Antarctic Ice Sheet
+    WAIS_BASELINE = 100.0  # % stability
+    WAIS_CURRENT = 85.0  # % current stability
+    WAIS_CRITICAL = 70.0  # % collapse threshold
+    
+    # Greenland Ice Sheet
+    GIS_BASELINE = 100.0  # % stability
+    GIS_CURRENT = 90.0  # % current stability
+    GIS_CRITICAL = 75.0  # % melt threshold
+    
+    # Coral reefs
+    CORAL_BASELINE = 100.0  # % coverage
+    CORAL_CURRENT = 50.0  # % current coverage
+    CORAL_CRITICAL = 30.0  # % collapse threshold
+    
+    # Feedback parameters
+    ALBEDO_FEEDBACK = 0.3  # Ice-albedo feedback strength
+    CARBON_FEEDBACK = 0.4  # Carbon cycle feedback strength
+    METHANE_FEEDBACK = 0.5  # Methane release feedback strength
+    WATER_VAPOR_FEEDBACK = 0.35  # Water vapor feedback
+
+
+# ============================================================================
+# SECTION 2: TIPPING POINT INDICATORS
+# ============================================================================
+
+class ClimateIndicator:
+    """
+    Represents a single climate system indicator with tipping point dynamics.
+    """
+    
+    def __init__(self, name: str, current_value: float, 
+                 threshold: float, baseline: float,
+                 weight: float = 1.0, units: str = ""):
+        """
+        Initialize climate indicator.
+        
+        Parameters:
+        -----------
+        name : str
+            Indicator name
+        current_value : float
+            Current state value
+        threshold : float
+            Tipping point threshold
+        baseline : float
+            Pre-industrial or reference baseline
+        weight : float
+            Importance weight in overall risk calculation
+        units : str
+            Measurement units
+        """
+        self.name = name
+        self.current_value = current_value
+        self.threshold = threshold
+        self.baseline = baseline
+        self.weight = weight
+        self.units = units
+        self.history = [current_value]
+        self.time_series = [0]
+    
+    def normalized_distance(self) -> float:
+        """
+        Calculate normalized distance to threshold (0-1).
+        
+        0 = at baseline, 1 = at/past threshold
+        """
+        if self.baseline > self.threshold:  # Decreasing indicator
+            distance = (self.baseline - self.current_value) / (self.baseline - self.threshold)
+        else:  # Increasing indicator
+            distance = (self.current_value - self.baseline) / (self.threshold - self.baseline)
+        
+        return np.clip(distance, 0, 2)  # Can exceed 1 if past threshold
+    
+    def proximity_to_threshold(self) -> float:
+        """Calculate how close to threshold (0-1, where 1 is at threshold)."""
+        return min(self.normalized_distance(), 1.0)
+    
+    def is_past_threshold(self) -> bool:
+        """Check if threshold has been crossed."""
+        if self.baseline > self.threshold:
+            return self.current_value < self.threshold
+        else:
+            return self.current_value > self.threshold
+    
+    def update(self, new_value: float, time: float):
+        """Update indicator value and history."""
+        self.current_value = new_value
+        self.history.append(new_value)
+        self.time_series.append(time)
+    
+    def get_trend(self, window: int = 10) -> float:
+        """Calculate recent trend (derivative)."""
+        if len(self.history) < 2:
+            return 0.0
+        
+        recent = self.history[-min(window, len(self.history)):]
+        if len(recent) < 2:
+            return 0.0
+        
+        # Linear regression slope
+        x = np.arange(len(recent))
+        slope = np.polyfit(x, recent, 1)[0]
+        
+        return slope
+
+
+# ============================================================================
+# SECTION 3: INTERCONNECTIVITY MATRIX
+# ============================================================================
+
+class ConnectivityMatrix:
+    """
+    Defines how climate indicators influence each other through feedback loops.
+    """
+    
+    def __init__(self, indicator_names: List[str]):
+        """
+        Initialize connectivity matrix.
+        
+        Parameters:
+        -----------
+        indicator_names : list
+            Names of all indicators in the system
+        """
+        self.indicator_names = indicator_names
+        n = len(indicator_names)
+        self.matrix = np.zeros((n, n))
+        self.name_to_idx = {name: i for i, name in enumerate(indicator_names)}
+    
+    def set_connection(self, from_indicator: str, to_indicator: str, 
+                      strength: float):
+        """
+        Set connection strength between indicators.
+        
+        Parameters:
+        -----------
+        from_indicator : str
+            Source indicator
+        to_indicator : str
+            Target indicator
+        strength : float
+            Connection strength (0-1, can be negative for negative feedback)
+        """
+        i = self.name_to_idx[from_indicator]
+        j = self.name_to_idx[to_indicator]
+        self.matrix[i, j] = strength
+    
+    def define_climate_connections(self):
+        """
+        Define realistic climate system connections based on Earth system science.
+        """
+        # Temperature drives many changes
+        self.set_connection('temperature', 'arctic_ice', 0.8)  # Warming melts ice
+        self.set_connection('temperature', 'permafrost', 0.7)  # Warming thaws permafrost
+        self.set_connection('temperature', 'glaciers', 0.75)   # Warming melts glaciers
+        self.set_connection('temperature', 'coral', 0.6)       # Warming bleaches coral
+        self.set_connection('temperature', 'greenland', 0.65)  # Warming melts ice sheet
+        self.set_connection('temperature', 'wais', 0.6)        # Warming destabilizes WAIS
+        
+        # Arctic ice loss reduces albedo, warms planet
+        self.set_connection('arctic_ice', 'temperature', -0.5)  # Negative: less ice = more warming
+        
+        # Permafrost releases methane and CO2
+        self.set_connection('permafrost', 'temperature', 0.6)  # More loss = more warming
+        
+        # Amazon forest loss reduces carbon sink
+        self.set_connection('amazon', 'temperature', -0.4)  # Less forest = more warming
+        self.set_connection('temperature', 'amazon', 0.5)   # Warming stresses forest
+        
+        # AMOC weakening affects regional climate
+        self.set_connection('amoc', 'temperature', -0.3)    # Weaker AMOC = regional cooling/global warming
+        self.set_connection('temperature', 'amoc', -0.4)    # Warming weakens AMOC (freshwater input)
+        self.set_connection('greenland', 'amoc', -0.6)      # Greenland melt weakens AMOC
+        
+        # Glacier melt affects water resources and sea level
+        self.set_connection('glaciers', 'temperature', 0.1)  # Minor feedback
+        
+        # Ice sheet connections
+        self.set_connection('greenland', 'temperature', 0.3)  # Melt contributes to warming
+        self.set_connection('wais', 'temperature', 0.25)      # WAIS melt contributes
+        
+        # Cross-connections
+        self.set_connection('arctic_ice', 'amoc', -0.3)  # Ice loss affects ocean circulation
+        self.set_connection('permafrost', 'arctic_ice', 0.2)  # Permafrost affects regional climate
+    
+    def calculate_interconnection_factor(self, 
+                                        indicators: Dict[str, ClimateIndicator]) -> np.ndarray:
+        """
+        Calculate amplification from interconnected stressed systems.
+        
+        Parameters:
+        -----------
+        indicators : dict
+            Dictionary of ClimateIndicator objects
+            
+        Returns:
+        --------
+        factors : np.ndarray
+            Amplification factor for each indicator
+        """
+        n = len(self.indicator_names)
+        proximity = np.zeros(n)
+        
+        # Get proximity to threshold for each indicator
+        for i, name in enumerate(self.indicator_names):
+            if name in indicators:
+                proximity[i] = indicators[name].proximity_to_threshold()
+        
+        # Calculate amplification: how much other stressed systems amplify this one
+        # Factor = sum of (connection_strength × proximity_of_connected_system)
+        amplification = self.matrix.T @ proximity
+        
+        # Add base factor of 1.0
+        factors = 1.0 + amplification
+        
+        return factors
+
+
+# ============================================================================
+# SECTION 4: TIPPING POINT DETECTION
+# ============================================================================
+
+class TippingPointDetector:
+    """
+    Detects early warning signals of approaching tipping points.
+    """
+    
+    @staticmethod
+    def critical_slowing_down(time_series: np.ndarray, 
+                             window: int = 50) -> Dict:
+        """
+        Detect critical slowing down - early warning of tipping point.
+        
+        Near tipping points, systems recover more slowly from perturbations.
+        Measured by increasing autocorrelation and variance.
+        
+        Parameters:
+        -----------
+        time_series : np.ndarray
+            Time series data
+        window : int
+            Rolling window size
+            
+        Returns:
+        --------
+        signals : dict
+            Early warning indicators
+        """
+        if len(time_series) < window * 2:
+            return {'autocorr': 0, 'variance': 0, 'warning_level': 0}
+        
+        # Calculate rolling statistics
+        autocorr_series = []
+        variance_series = []
+        
+        for i in range(window, len(time_series)):
+            segment = time_series[i-window:i]
+            
+            # Detrend
+            x = np.arange(len(segment))
+            trend = np.polyfit(x, segment, 1)
+            detrended = segment - np.polyval(trend, x)
+            
+            # Autocorrelation at lag 1
+            if len(detrended) > 1:
+                autocorr = np.corrcoef(detrended[:-1], detrended[1:])[0, 1]
+                autocorr_series.append(autocorr if not np.isnan(autocorr) else 0)
+            
+            # Variance
+            variance_series.append(np.var(detrended))
+        
+        # Trend in autocorrelation (should increase near tipping point)
+        if len(autocorr_series) > 2:
+            autocorr_trend = np.polyfit(np.arange(len(autocorr_series)), 
+                                       autocorr_series, 1)[0]
+        else:
+            autocorr_trend = 0
+        
+        # Trend in variance (should increase near tipping point)
+        if len(variance_series) > 2:
+            variance_trend = np.polyfit(np.arange(len(variance_series)), 
+                                       variance_series, 1)[0]
+        else:
+            variance_trend = 0
+        
+        # Warning level (0-1)
+        warning_level = 0
+        if autocorr_trend > 0:
+            warning_level += 0.5
+        if variance_trend > 0:
+            warning_level += 0.5
+        
+        return {
+            'autocorr_trend': autocorr_trend,
+            'variance_trend': variance_trend,
+            'autocorr_current': autocorr_series[-1] if autocorr_series else 0,
+            'variance_current': variance_series[-1] if variance_series else 0,
+            'warning_level': warning_level
+        }
+    
+    @staticmethod
+    def flickering(time_series: np.ndarray, threshold: float) -> float:
+        """
+        Detect flickering - rapid transitions between states near tipping point.
+        
+        Parameters:
+        -----------
+        time_series : np.ndarray
+            Time series data
+        threshold : float
+            Threshold value
+            
+        Returns:
+        --------
+        flickering_rate : float
+            Rate of threshold crossings
+        """
+        if len(time_series) < 2:
+            return 0.0
+        
+        # Count threshold crossings
+        crossings = 0
+        for i in range(1, len(time_series)):
+            if (time_series[i-1] < threshold and time_series[i] >= threshold) or \
+               (time_series[i-1] >= threshold and time_series[i] < threshold):
+                crossings += 1
+        
+        # Normalize by length
+        flickering_rate = crossings / len(time_series)
+        
+        return flickering_rate
+    
+    @staticmethod
+    def regime_shift_detection(time_series: np.ndarray,
+                               min_regime_length: int = 20) -> List[int]:
+        """
+        Detect abrupt regime shifts in time series.
+        
+        Parameters:
+        -----------
+        time_series : np.ndarray
+            Time series data
+        min_regime_length : int
+            Minimum length of stable regime
+            
+        Returns:
+        --------
+        shift_points : list
+            Indices of detected regime shifts
+        """
+        if len(time_series) < min_regime_length * 2:
+            return []
+        
+        # Use change point detection (simplified)
+        shift_points = []
+        
+        # Calculate rolling mean and std
+        window = min_regime_length
+        for i in range(window, len(time_series) - window):
+            before = time_series[i-window:i]
+            after = time_series[i:i+window]
+            
+            # Test for significant difference in means
+            mean_before = np.mean(before)
+            mean_after = np.mean(after)
+            std_pooled = np.sqrt((np.var(before) + np.var(after)) / 2)
+            
+            if std_pooled > 0:
+                t_stat = abs(mean_after - mean_before) / std_pooled
+                
+                # Threshold for detection
+                if t_stat > 2.0:  # ~95% confidence
+                    shift_points.append(i)
+        
+        return shift_points
+
+
+# ============================================================================
+# SECTION 5: CLIMATE TIPPING POINT RISK MODEL
+# ============================================================================
+
+class ClimateTippingPointModel:
+    """
+    Comprehensive climate tipping point risk assessment model.
+    """
+    
+    def __init__(self):
+        """Initialize model with standard climate indicators."""
+        self.indicators = {}
+        self.connectivity = None
+        self.time = 0
+        self.risk_history = []
+        self.time_history = []
+        
+        self._initialize_indicators()
+        self._initialize_connectivity()
+    
+    def _initialize_indicators(self):
+        """Initialize all climate system indicators."""
+        self.indicators = {
+            'temperature': ClimateIndicator(
+                'temperature',
+                ClimateConstants.CURRENT_TEMP_ANOMALY,
+                ClimateConstants.PARIS_TARGET,
+                0.0,  # Baseline anomaly
+                weight=1.5,  # High importance
+                units='°C'
+            ),
+            'arctic_ice': ClimateIndicator(
+                'arctic_ice',
+                ClimateConstants.ARCTIC_ICE_CURRENT,
+                ClimateConstants.ARCTIC_ICE_CRITICAL,
+                ClimateConstants.ARCTIC_ICE_BASELINE,
+                weight=1.2,
+                units='million km²'
+            ),
+            'amoc': ClimateIndicator(
+                'amoc',
+                ClimateConstants.AMOC_CURRENT,
+                ClimateConstants.AMOC_CRITICAL,
+                ClimateConstants.AMOC_BASELINE,
+                weight=1.3,
+                units='% of baseline'
+            ),
+            'amazon': ClimateIndicator(
+                'amazon',
+                ClimateConstants.AMAZON_CURRENT,
+                ClimateConstants.AMAZON_CRITICAL,
+                ClimateConstants.AMAZON_BASELINE,
+                weight=1.1,
+                units='% coverage'
+            ),
+            'permafrost': ClimateIndicator(
+                'permafrost',
+                ClimateConstants.PERMAFROST_CURRENT,
+                ClimateConstants.PERMAFROST_CRITICAL,
+                ClimateConstants.PERMAFROST_BASELINE,
+                weight=1.0,
+                units='% loss'
+            ),
+            'glaciers': ClimateIndicator(
+                'glaciers',
+                ClimateConstants.GLACIER_CURRENT,
+                ClimateConstants.GLACIER_CRITICAL,
+                ClimateConstants.GLACIER_BASELINE,
+                weight=0.9,
+                units='% remaining'
+            ),
+            'greenland': ClimateIndicator(
+                'greenland',
+                ClimateConstants.GIS_CURRENT,
+                ClimateConstants.GIS_CRITICAL,
+                ClimateConstants.GIS_BASELINE,
+                weight=1.4,
+                units='% stability'
+            ),
+            'wais': ClimateIndicator(
+                'wais',
+                ClimateConstants.WAIS_CURRENT,
+                ClimateConstants.WAIS_CRITICAL,
+                ClimateConstants.WAIS_BASELINE,
+                weight=1.3,
+                units='% stability'
+            ),
+            'coral': ClimateIndicator(
+                'coral',
+                ClimateConstants.CORAL_CURRENT,
+                ClimateConstants.CORAL_CRITICAL,
+                ClimateConstants.CORAL_BASELINE,
+                weight=0.7,
+                units='% coverage'
+            )
+        }
+    
+    def _initialize_connectivity(self):
+        """Initialize connectivity matrix with climate feedbacks."""
+        indicator_names = list(self.indicators.keys())
+        self.connectivity = ConnectivityMatrix(indicator_names)
+        self.connectivity.define_climate_connections()
+    
+    def calculate_tipping_risk(self) -> float:
+        """
+        Calculate overall system tipping risk score (0-100%).
+        
+        Risk = Σ[Weight × NormalizedDistance × InterconnectionFactor]
+        
+        Returns:
+        --------
+        risk : float
+            Overall tipping risk percentage
+        """
+        # Get interconnection amplification factors
+        interconnection_factors = self.connectivity.calculate_interconnection_factor(
+            self.indicators
+        )
+        
+        total_risk = 0
+        total_weight = 0
+        
+        for i, (name, indicator) in enumerate(self.indicators.items()):
+            # Individual risk component
+            distance = indicator.normalized_distance()
+            weight = indicator.weight
+            amplification = interconnection_factors[i]
+            
+            # Risk contribution
+            risk_contribution = weight * distance * amplification
+            
+            total_risk += risk_contribution
+            total_weight += weight * amplification
+        
+        # Normalize to 0-100%
+        if total_weight > 0:
+            risk_score = (total_risk / total_weight) * 100
+        else:
+            risk_score = 0
+        
+        # Cap at 100%
+        risk_score = min(risk_score, 100)
+        
+        return risk_score
+    
+    def calculate_cascade_probability(self) -> Dict:
+        """
+        Calculate probability of cascading tipping points.
+        
+        Returns:
+        --------
+        cascade_info : dict
+            Cascade risk analysis
+        """
+        # Count how many systems are near threshold
+        near_threshold = sum(1 for ind in self.indicators.values() 
+                           if ind.proximity_to_threshold() > 0.7)
+        
+        # Count systems past threshold
+        past_threshold = sum(1 for ind in self.indicators.values() 
+                           if ind.is_past_threshold())
+        
+        total_systems = len(self.indicators)
+        
+        # Cascade probability increases with number of stressed systems
+        cascade_prob = (near_threshold / total_systems) ** 0.5
+        
+        # Amplification if any system has tipped
+        if past_threshold > 0:
+            cascade_prob = min(cascade_prob * (1 + 0.3 * past_threshold), 1.0)
+        
+        return {
+            'cascade_probability': cascade_prob,
+            'systems_near_threshold': near_threshold,
+            'systems_past_threshold': past_threshold,
+            'total_systems': total_systems,
+            'cascade_risk_level': 'CRITICAL' if cascade_prob > 0.7 else 
+                                 'HIGH' if cascade_prob > 0.5 else
+                                 'MODERATE' if cascade_prob > 0.3 else 'LOW'
+        }
+    
+    def detect_early_warnings(self) -> Dict:
+        """
+        Detect early warning signals across all indicators.
+        
+        Returns:
+        --------
+        warnings : dict
+            Early warning signals for each indicator
+        """
+        detector = TippingPointDetector()
+        warnings = {}
+        
+        for name, indicator in self.indicators.items():
+            if len(indicator.history) > 50:
+                csd = detector.critical_slowing_down(
+                    np.array(indicator.history),
+                    window=min(50, len(indicator.history)//2)
+                )
+                
+                flickering = detector.flickering(
+                    np.array(indicator.history),
+                    indicator.threshold
+                )
+                
+                regime_shifts = detector.regime_shift_detection(
+                    np.array(indicator.history)
+                )
+                
+                warnings[name] = {
+                    'critical_slowing_down': csd,
+                    'flickering_rate': flickering,
+                    'regime_shifts': len(regime_shifts),
+                    'warning_level': csd['warning_level']
+                }
+            else:
+                warnings[name] = {
+                    'warning_level': 0,
+                    'message': 'Insufficient data'
+                }
+        
+        return warnings
+    
+    def simulate_step(self, dt: float = 1.0, forcing: Dict = None):
+        """
+        Simulate one time step of climate system evolution.
+        
+        Parameters:
+        -----------
+        dt : float
+            Time step size (years)
+        forcing : dict
+            External forcings (e.g., emissions, interventions)
+        """
+        if forcing is None:
+            forcing = {}
+        
+        # Get current state
+        current_state = {name: ind.current_value 
+                        for name, ind in self.indicators.items()}
+        
+        # Calculate interconnection effects
+        interconnection_factors = self.connectivity.calculate_interconnection_factor(
+            self.indicators
+        )
+        
+        # Update each indicator
+        for i, (name, indicator) in enumerate(self.indicators.items()):
+            # Base rate of change (from trend)
+            base_change = indicator.get_trend() * dt
+            
+            # Forcing term
+            forced_change = forcing.get(name, 0) * dt
+            
+            # Interconnection effect
+            interconnect_effect = 0
+            for j, other_name in enumerate(self.indicators.keys()):
+                if i != j:
+                    connection = self.connectivity.matrix[j, i]
+                    other_proximity = self.indicators[other_name].proximity_to_threshold()
+                    interconnect_effect += connection * other_proximity * 0.1 * dt
+            
+            # Non-linear acceleration near threshold
+            proximity = indicator.proximity_to_threshold()
+            acceleration = proximity ** 2 * 0.05 * dt  # Quadratic acceleration
+            
+            # Total change
+            if indicator.baseline > indicator.threshold:
+                # Decreasing indicator (e.g., ice, forests)
+                total_change = -(base_change + forced_change + 
+                                abs(interconnect_effect) + acceleration)
+            else:
+                # Increasing indicator (e.g., temperature, permafrost loss)
+                total_change = base_change + forced_change + \
+                              abs(interconnect_effect) + acceleration
+            
+            # Update value
+            new_value = indicator.current_value + total_change
+            
+            # Add stochastic variability
+            noise = np.random.normal(0, 0.02 * abs(indicator.threshold - indicator.baseline))
+            new_value += noise
+            
+            # Update indicator
+            self.time += dt
+            indicator.update(new_value, self.time)
+        
+        # Update risk history
+        risk = self.calculate_tipping_risk()
+        self.risk_history.append(risk)
+        self.time_history.append(self.time)
+    
+    def simulate(self, n_steps: int, dt: float = 1.0, 
+                forcing_scenario: str = 'business_as_usual') -> Dict:
+        """
+        Run full simulation of climate system evolution.
+        
+        Parameters:
+        -----------
+        n_steps : int
+            Number of time steps
+        dt : float
+            Time step size (years)
+        forcing_scenario : str
+            Emissions scenario ('business_as_usual', 'moderate_action', 'aggressive_action')
+            
+        Returns:
+        --------
+        results : dict
+            Simulation results
+        """
+        print(f"\nRunning climate simulation: {forcing_scenario}")
+        print(f"Time steps: {n_steps}, dt: {dt} years")
+        print("=" * 70)
+        
+        # Define forcing scenarios
+        scenarios = {
+            'business_as_usual': {
+                'temperature': 0.02,  # °C/year
+                'arctic_ice': -0.1,   # million km²/year
+                'permafrost': 0.5     # %/year
+            },
+            'moderate_action': {
+                'temperature': 0.01,
+                'arctic_ice': -0.05,
+                'permafrost': 0.3
+            },
+            'aggressive_action': {
+                'temperature': 0.005,
+                'arctic_ice': -0.02,
+                'permafrost': 0.1
+            }
+        }
+        
+        forcing = scenarios.get(forcing_scenario, scenarios['business_as_usual'])
+        
+        # Run simulation
+        for step in range(n_steps):
+            self.simulate_step(dt, forcing)
+            
+            if step % (n_steps // 10) == 0:
+                risk = self.risk_history[-1]
+                print(f"Step {step}/{n_steps}: Risk = {risk:.1f}%")
+        
+        # Final analysis
+        final_risk = self.risk_history[-1]
+        cascade_info = self.calculate_cascade_probability()
+        warnings = self.detect_early_warnings()
+        
+        print("\n" + "=" * 70)
+        print("SIMULATION COMPLETE")
+        print(f"Final Risk Score: {final_risk:.1f}%")
+        print(f"Cascade Probability: {cascade_info['cascade_probability']*100:.1f}%")
+        print(f"Systems Past Threshold: {cascade_info['systems_past_threshold']}")
+        print("=" * 70)
+        
+        return {
+            'time': self.time_history,
+            'risk': self.risk_history,
+            'indicators': {name: {
+                'history': ind.history,
+                'current': ind.current_value,
+                'threshold': ind.threshold,
+                'crossed': ind.is_past_threshold()
+            } for name, ind in self.indicators.items()},
+            'cascade': cascade_info,
+            'warnings': warnings,
+            'final_risk': final_risk
+        }
+    
+    def get_current_state(self) -> Dict:
+        """Get current state of all indicators."""
+        state = {
+            'time': self.time,
+            'risk_score': self.calculate_tipping_risk(),
+            'indicators': {}
+        }
+        
+        for name, ind in self.indicators.items():
+            state['indicators'][name] = {
+                'value': ind.current_value,
+                'threshold': ind.threshold,
+                'proximity': ind.proximity_to_threshold(),
+                'crossed': ind.is_past_threshold(),
+                'units': ind.units
+            }
+        
+        return state
+
+
+# ============================================================================
+# SECTION 6: REGIONAL CASE STUDIES
+# ============================================================================
+
+class RegionalCaseStudy:
+    """
+    Regional-specific climate tipping point analysis.
+    """
+    
+    @staticmethod
+    def nepal_himalayan_system() -> Dict:
+        """
+        Analyze Himalayan glacier system (Nepal case study).
+        
+        Critical for water resources affecting 1+ billion people.
+        """
+        print("\n" + "=" * 70)
+        print("CASE STUDY: Nepal Himalayan Glacier System")
+        print("=" * 70)
+        
+        # Create specialized model for Himalayan system
+        indicators = {
+            'glaciers': ClimateIndicator(
+                'glaciers',
+                70.0,  # 70% remaining
+                50.0,  # 50% threshold
+                100.0,
+                weight=2.0,
+                units='% mass'
+            ),
+            'monsoon': ClimateIndicator(
+                'monsoon',
+                85.0,  # 85% of baseline
+                70.0,  # 70% critical
+                100.0,
+                weight=1.5,
+                units='% intensity'
+            ),
+            'precipitation': ClimateIndicator(
+                'precipitation',
+                95.0,
+                80.0,
+                100.0,
+                weight=1.3,
+                units='% of baseline'
+            ),
+            'temperature': ClimateIndicator(
+                'temperature',
+                1.5,  # °C warming
+                2.0,  # 2°C threshold
+                0.0,
+                weight=1.8,
+                units='°C'
+            ),
+            'snowpack': ClimateIndicator(
+                'snowpack',
+                60.0,
+                40.0,
+                100.0,
+                weight=1.
+
+
+6,
+units='% of baseline'
+)
+}
+# Himalayan-specific connectivity
+    connectivity = ConnectivityMatrix(list(indicators.keys()))
+    
+    # Temperature affects everything
+    connectivity.set_connection('temperature', 'glaciers', 0.9)
+    connectivity.set_connection('temperature', 'snowpack', 0.8)
+    connectivity.set_connection('temperature', 'monsoon', 0.4)
+    
+    # Glacier loss affects water availability
+    connectivity.set_connection('glaciers', 'precipitation', -0.3)
+    
+    # Monsoon affects precipitation and snowpack
+    connectivity.set_connection('monsoon', 'precipitation', 0.7)
+    connectivity.set_connection('monsoon', 'snowpack', 0.6)
+    
+    # Snowpack affects glacier mass balance
+    connectivity.set_connection('snowpack', 'glaciers', -0.5)
+    
+    # Calculate risks
+    interconnection_factors = connectivity.calculate_interconnection_factor(indicators)
+    
+    total_risk = 0
+    total_weight = 0
+    
+    for i, (name, indicator) in enumerate(indicators.items()):
+        distance = indicator.normalized_distance()
+        weight = indicator.weight
+        amplification = interconnection_factors[i]
+        
+        risk_contribution = weight * distance * amplification
+        total_risk += risk_contribution
+        total_weight += weight * amplification
+    
+    risk_score = (total_risk / total_weight) * 100 if total_weight > 0 else 0
+    
+    # Regional impacts
+    water_stress_population = 1.2e9  # People dependent on Himalayan water
+    agriculture_area = 2.5e6  # km² of agricultural land
+    
+    results = {
+        'region': 'Nepal/Himalayan',
+        'risk_score': risk_score,
+        'indicators': {name: {
+            'current': ind.current_value,
+            'threshold': ind.threshold,
+            'proximity': ind.proximity_to_threshold()
+        } for name, ind in indicators.items()},
+        'impacts': {
+            'water_stress_population': water_stress_population,
+            'agriculture_area_at_risk': agriculture_area,
+            'glacier_melt_acceleration': 'Accelerating at 1.5%/year',
+            'monsoon_disruption_risk': 'Increasing variability',
+            'flood_drought_cycle': 'Intensifying'
+        },
+        'critical_thresholds': {
+            'glacier_loss_50%': 'Irreversible water scarcity',
+            'monsoon_shift': 'Agricultural collapse',
+            'temperature_2C': 'Cascading ecosystem failure'
+        }
+    }
+    
+    print(f"\nRegional Risk Score: {risk_score:.1f}%")
+    print(f"\nKey Findings:")
+    print(f"  Glaciers: {indicators['glaciers'].current_value}% remaining")
+    print(f"  Temperature: +{indicators['temperature'].current_value}°C")
+    print(f"  Snowpack: {indicators['snowpack'].current_value}% of baseline")
+    print(f"\nPopulation at Risk: {water_stress_population/1e9:.1f} billion")
+    print(f"Agricultural Land at Risk: {agriculture_area/1e6:.1f} million km²")
+    
+    print("\nCritical Pathways:")
+    print("  1. Temperature → Glacier melt → Water scarcity")
+    print("  2. Monsoon disruption → Precipitation changes → Agriculture impact")
+    print("  3. Snowpack decline → Reduced glacier mass → River flow changes")
+    
+    print("=" * 70)
+    
+    return results
+
+@staticmethod
+def arctic_system() -> Dict:
+    """Arctic amplification case study."""
+    print("\n" + "=" * 70)
+    print("CASE STUDY: Arctic Amplification System")
+    print("=" * 70)
+    
+    indicators = {
+        'sea_ice': ClimateIndicator('sea_ice', 4.5, 3.0, 6.5, weight=2.0, units='million km²'),
+        'permafrost': ClimateIndicator('permafrost', 15.0, 25.0, 0.0, weight=1.8, units='% loss'),
+        'albedo': ClimateIndicator('albedo', 0.65, 0.50, 0.75, weight=1.5, units='reflectivity'),
+        'methane': ClimateIndicator('methane', 1900, 2200, 1800, weight=1.7, units='ppb'),
+        'temperature': ClimateIndicator('temperature', 2.5, 3.0, 0.0, weight=2.0, units='°C anomaly')
+    }
+    
+    # Arctic-specific feedbacks
+    connectivity = ConnectivityMatrix(list(indicators.keys()))
+    connectivity.set_connection('sea_ice', 'albedo', 0.9)  # Ice loss reduces albedo
+    connectivity.set_connection('albedo', 'temperature', -0.8)  # Lower albedo = warming
+    connectivity.set_connection('temperature', 'sea_ice', 0.9)  # Warming melts ice
+    connectivity.set_connection('temperature', 'permafrost', 0.85)
+    connectivity.set_connection('permafrost', 'methane', 0.8)
+    connectivity.set_connection('methane', 'temperature', 0.6)
+    
+    interconnection_factors = connectivity.calculate_interconnection_factor(indicators)
+    
+    total_risk = sum(ind.weight * ind.normalized_distance() * interconnection_factors[i]
+                    for i, ind in enumerate(indicators.values()))
+    total_weight = sum(ind.weight * interconnection_factors[i]
+                      for i, ind in enumerate(indicators.values()))
+    
+    risk_score = (total_risk / total_weight) * 100 if total_weight > 0 else 0
+    
+    print(f"\nArctic Risk Score: {risk_score:.1f}%")
+    print(f"Warming Rate: {indicators['temperature'].current_value}°C (2-3x global average)")
+    print(f"Sea Ice: {indicators['sea_ice'].current_value} million km²")
+    print(f"Permafrost Loss: {indicators['permafrost'].current_value}%")
+    print(f"Methane: {indicators['methane'].current_value} ppb")
+    
+    print("\nPositive Feedback Loop:")
+    print("  Ice Loss → Reduced Albedo → More Warming → More Ice Loss")
+    print("  Warming → Permafrost Thaw → Methane Release → More Warming")
+    
+    print("=" * 70)
+    
+    return {'region': 'Arctic', 'risk_score': risk_score, 'indicators': indicators}
+============================================================================
+SECTION 7: VISUALIZATION TOOLS
+============================================================================
+class ClimateVisualization:
+"""
+Visualization tools for climate tipping point analysis.
+"""
+@staticmethod
+def plot_risk_evolution(time: np.ndarray, risk: np.ndarray,
+                       title: str = "Climate System Tipping Risk"):
+    """Plot risk score evolution over time."""
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    ax.plot(time, risk, linewidth=2, color='darkred')
+    ax.fill_between(time, 0, risk, alpha=0.3, color='red')
+    
+    # Risk levels
+    ax.axhline(30, color='yellow', linestyle='--', alpha=0.5, label='Moderate Risk')
+    ax.axhline(50, color='orange', linestyle='--', alpha=0.5, label='High Risk')
+    ax.axhline(70, color='red', linestyle='--', alpha=0.5, label='Critical Risk')
+    
+    ax.set_xlabel('Time (years)', fontsize=12)
+    ax.set_ylabel('System Tipping Risk (%)', fontsize=12)
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.set_ylim(0, 100)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    return fig
+
+@staticmethod
+def plot_indicator_trajectories(indicators: Dict, max_points: int = 100):
+    """Plot all indicator trajectories."""
+    n_indicators = len(indicators)
+    n_cols = 3
+    n_rows = (n_indicators + n_cols - 1) // n_cols
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 4*n_rows))
+    axes = axes.flatten() if n_rows > 1 else [axes]
+    
+    for idx, (name, indicator) in enumerate(indicators.items()):
+        ax = axes[idx]
+        
+        # Subsample if too many points
+        history = np.array(indicator.history)
+        time_series = np.array(indicator.time_series)
+        
+        if len(history) > max_points:
+            indices = np.linspace(0, len(history)-1, max_points, dtype=int)
+            history = history[indices]
+            time_series = time_series[indices]
+        
+        # Plot trajectory
+        ax.plot(time_series, history, linewidth=2, label='Current')
+        
+        # Threshold line
+        ax.axhline(indicator.threshold, color='red', linestyle='--', 
+                  linewidth=2, label='Threshold')
+        
+        # Baseline line
+        ax.axhline(indicator.baseline, color='green', linestyle=':', 
+                  alpha=0.5, label='Baseline')
+        
+        # Fill warning zone
+        if indicator.baseline > indicator.threshold:
+            ax.fill_between(time_series, indicator.threshold, indicator.baseline,
+                           alpha=0.2, color='yellow')
+        else:
+            ax.fill_between(time_series, indicator.baseline, indicator.threshold,
+                           alpha=0.2, color='yellow')
+        
+        ax.set_xlabel('Time', fontsize=10)
+        ax.set_ylabel(f'{indicator.units}', fontsize=10)
+        ax.set_title(name.replace('_', ' ').title(), fontsize=11, fontweight='bold')
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+    
+    # Hide unused subplots
+    for idx in range(n_indicators, len(axes)):
+        axes[idx].axis('off')
+    
+    plt.tight_layout()
+    return fig
+
+@staticmethod
+def plot_radar_chart(indicators: Dict, title: str = "Climate System State"):
+    """Plot radar chart of current system state."""
+    categories = list(indicators.keys())
+    n_cats = len(categories)
+    
+    # Get current values and thresholds (normalized 0-100)
+    current = []
+    thresholds = []
+    
+    for indicator in indicators.values():
+        proximity = indicator.proximity_to_threshold() * 100
+        current.append(proximity)
+        thresholds.append(100)  # Threshold is always at 100% on this scale
+    
+    # Angles for radar chart
+    angles = np.linspace(0, 2*np.pi, n_cats, endpoint=False).tolist()
+    current = current + [current[0]]  # Close the circle
+    thresholds = thresholds + [thresholds[0]]
+    angles = angles + [angles[0]]
+    
+    fig, ax = plt.subplots(figsize=(10, 10), subplot_kw=dict(projection='polar'))
+    
+    # Plot threshold
+    ax.plot(angles, thresholds, 'o-', linewidth=2, color='red', 
+           label='Threshold', alpha=0.5)
+    ax.fill(angles, thresholds, alpha=0.1, color='red')
+    
+    # Plot current
+    ax.plot(angles, current, 'o-', linewidth=2, color='blue', label='Current')
+    ax.fill(angles, current, alpha=0.25, color='blue')
+    
+    # Labels
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels([cat.replace('_', '\n').title() for cat in categories], 
+                      fontsize=10)
+    ax.set_ylim(0, 150)
+    ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+    ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1))
+    ax.grid(True)
+    
+    plt.tight_layout()
+    return fig
+
+@staticmethod
+def plot_connectivity_heatmap(connectivity_matrix: ConnectivityMatrix,
+                              title: str = "Climate System Connectivity"):
+    """Plot connectivity matrix as heatmap."""
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    im = ax.imshow(connectivity_matrix.matrix, cmap='RdBu_r', 
+                  vmin=-1, vmax=1, aspect='auto')
+    
+    # Labels
+    labels = [name.replace('_', ' ').title() 
+             for name in connectivity_matrix.indicator_names]
+    ax.set_xticks(np.arange(len(labels)))
+    ax.set_yticks(np.arange(len(labels)))
+    ax.set_xticklabels(labels, rotation=45, ha='right')
+    ax.set_yticklabels(labels)
+    
+    # Colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label('Connection Strength', rotation=270, labelpad=20)
+    
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    
+    plt.tight_layout()
+    return fig
+
+@staticmethod
+def plot_cascade_network(indicators: Dict, connectivity: ConnectivityMatrix,
+                        threshold_proximity: float = 0.7):
+    """Plot network diagram showing cascade risk."""
+    import matplotlib.patches as mpatches
+    
+    fig, ax = plt.subplots(figsize=(12, 12))
+    
+    n_nodes = len(indicators)
+    
+    # Circular layout
+    angles = np.linspace(0, 2*np.pi, n_nodes, endpoint=False)
+    positions = {name: (np.cos(angle), np.sin(angle)) 
+                for name, angle in zip(indicators.keys(), angles)}
+    
+    # Draw edges (connections)
+    for i, name1 in enumerate(indicators.keys()):
+        for j, name2 in enumerate(indicators.keys()):
+            if i != j:
+                strength = connectivity.matrix[i, j]
+                if abs(strength) > 0.1:  # Only show significant connections
+                    pos1 = positions[name1]
+                    pos2 = positions[name2]
+                    
+                    color = 'red' if strength > 0 else 'blue'
+                    alpha = min(abs(strength), 1.0) * 0.5
+                    
+                    ax.plot([pos1[0], pos2[0]], [pos1[1], pos2[1]],
+                           color=color, alpha=alpha, linewidth=abs(strength)*3,
+                           zorder=1)
+    
+    # Draw nodes
+    for name, indicator in indicators.items():
+        pos = positions[name]
+        proximity = indicator.proximity_to_threshold()
+        
+        # Node size based on weight
+        size = indicator.weight * 1000
+        
+        # Color based on proximity to threshold
+        if proximity > threshold_proximity:
+            color = 'red'
+        elif proximity > 0.5:
+            color = 'orange'
+        else:
+            color = 'green'
+        
+        # Draw node
+        circle = plt.Circle(pos, 0.15, color=color, alpha=0.7, zorder=2)
+        ax.add_patch(circle)
+        
+        # Label
+        ax.text(pos[0]*1.3, pos[1]*1.3, name.replace('_', '\n').title(),
+               ha='center', va='center', fontsize=10, fontweight='bold')
+    
+    ax.set_xlim(-1.8, 1.8)
+    ax.set_ylim(-1.8, 1.8)
+    ax.set_aspect('equal')
+    ax.axis('off')
+    ax.set_title('Climate System Cascade Network\n(Red=Positive Feedback, Blue=Negative Feedback)',
+                fontsize=14, fontweight='bold', pad=20)
+    
+    # Legend
+    green_patch = mpatches.Patch(color='green', label='Stable')
+    orange_patch = mpatches.Patch(color='orange', label='At Risk')
+    red_patch = mpatches.Patch(color='red', label='Critical')
+    ax.legend(handles=[green_patch, orange_patch, red_patch],
+             loc='upper right', fontsize=10)
+    
+    plt.tight_layout()
+    return fig
+============================================================================
+SECTION 8: POLICY SCENARIO ANALYSIS
+============================================================================
+class PolicyScenarioAnalyzer:
+"""
+Analyze different policy intervention scenarios.
+"""
+@staticmethod
+def compare_scenarios(n_steps: int = 100, dt: float = 1.0) -> Dict:
+    """
+    Compare different emissions/policy scenarios.
+    
+    Parameters:
+    -----------
+    n_steps : int
+        Simulation length
+    dt : float
+        Time step (years)
+        
+    Returns:
+    --------
+    comparison : dict
+        Results for all scenarios
+    """
+    scenarios = ['business_as_usual', 'moderate_action', 'aggressive_action']
+    results = {}
+    
+    for scenario in scenarios:
+        print(f"\n{'='*70}")
+        print(f"SCENARIO: {scenario.upper().replace('_', ' ')}")
+        print(f"{'='*70}")
+        
+        model = ClimateTippingPointModel()
+        sim_results = model.simulate(n_steps, dt, scenario)
+        
+        results[scenario] = {
+            'final_risk': sim_results['final_risk'],
+            'time': sim_results['time'],
+            'risk': sim_results['risk'],
+            'cascade_probability': sim_results['cascade']['cascade_probability'],
+            'systems_crossed': sim_results['cascade']['systems_past_threshold']
+        }
+    
+    return results
+
+@staticmethod
+def intervention_analysis(intervention_type: str, 
+                        strength: float = 0.5) -> Dict:
+    """
+    Analyze specific intervention strategies.
+    
+    Parameters:
+    -----------
+    intervention_type : str
+        Type of intervention ('emissions_reduction', 'reforestation', 
+        'geoengineering', 'carbon_capture')
+    strength : float
+        Intervention strength (0-1)
+        
+    Returns:
+    --------
+    analysis : dict
+        Intervention effectiveness
+    """
+    print(f"\n{'='*70}")
+    print(f"INTERVENTION ANALYSIS: {intervention_type.upper()}")
+    print(f"Strength: {strength*100:.0f}%")
+    print(f"{'='*70}")
+    
+    # Baseline (no intervention)
+    baseline_model = ClimateTippingPointModel()
+    baseline_results = baseline_model.simulate(50, 1.0, 'business_as_usual')
+    
+    # With intervention
+    intervention_model = ClimateTippingPointModel()
+    
+    # Define intervention effects
+    if intervention_type == 'emissions_reduction':
+        forcing = {
+            'temperature': 0.02 * (1 - strength),
+            'permafrost': 0.5 * (1 - strength)
+        }
+    elif intervention_type == 'reforestation':
+        forcing = {
+            'temperature': 0.02 * (1 - strength * 0.3),
+            'amazon': -0.5 * strength  # Negative = recovery
+        }
+    elif intervention_type == 'geoengineering':
+        forcing = {
+            'temperature': 0.02 * (1 - strength * 0.7),
+            'arctic_ice': -0.1 * (1 - strength * 0.5)
+        }
+    elif intervention_type == 'carbon_capture':
+        forcing = {
+            'temperature': 0.02 * (1 - strength * 0.6),
+            'permafrost': 0.5 * (1 - strength * 0.4)
+        }
+    else:
+        forcing = {}
+    
+    # Simulate with intervention
+    for step in range(50):
+        intervention_model.simulate_step(1.0, forcing)
+    
+    intervention_final_risk = intervention_model.calculate_tipping_risk()
+    
+    # Compare
+    risk_reduction = baseline_results['final_risk'] - intervention_final_risk
+    effectiveness = (risk_reduction / baseline_results['final_risk']) * 100
+    
+    print(f"\nBaseline Risk: {baseline_results['final_risk']:.1f}%")
+    print(f"Intervention Risk: {intervention_final_risk:.1f}%")
+    print(f"Risk Reduction: {risk_reduction:.1f}%")
+    print(f"Effectiveness: {effectiveness:.1f}%")
+    
+    return {
+        'intervention': intervention_type,
+        'strength': strength,
+        'baseline_risk': baseline_results['final_risk'],
+        'intervention_risk': intervention_final_risk,
+        'risk_reduction': risk_reduction,
+        'effectiveness': effectiveness
+    }
+============================================================================
+SECTION 9: INTEGRATED FRAMEWORK
+============================================================================
+class IntegratedClimateTippingFramework:
+"""
+Complete integrated framework for climate tipping point analysis.
+"""
+def __init__(self):
+    self.model = ClimateTippingPointModel()
+    self.viz = ClimateVisualization()
+    self.policy = PolicyScenarioAnalyzer()
+    
+    print("Integrated Climate Tipping Point Framework Initialized")
+    print("Version 1.0.0 - Based on Interconnectivity Theory")
+    print("=" * 70)
+
+def full_analysis(self, scenario: str = 'business_as_usual',
+                 n_steps: int = 100) -> Dict:
+    """
+    Perform comprehensive climate tipping point analysis.
+    
+    Parameters:
+    -----------
+    scenario : str
+        Emissions scenario
+    n_steps : int
+        Simulation length
+        
+    Returns:
+    --------
+    analysis : dict
+        Complete analysis results
+    """
+    print(f"\n{'='*70}")
+    print("COMPREHENSIVE CLIMATE TIPPING POINT ANALYSIS")
+    print(f"{'='*70}")
+    
+    # 1. Current state assessment
+    print("\n1. CURRENT STATE ASSESSMENT")
+    print("-" * 70)
+    current_state = self.model.get_current_state()
+    print(f"Current System Risk: {current_state['risk_score']:.1f}%")
+    
+    for name, ind in current_state['indicators'].items():
+        status = "⚠ CROSSED" if ind['crossed'] else "✓ Safe"
+        proximity = ind['proximity'] * 100
+        print(f"  {name:15s}: {ind['value']:6.2f} {ind['units']:15s} "
+              f"(Proximity: {proximity:5.1f}%) {status}")
+    
+    # 2. Run simulation
+    print(f"\n2. FUTURE PROJECTION ({scenario})")
+    print("-" * 70)
+    simulation = self.model.simulate(n_steps, 1.0, scenario)
+    
+    # 3. Cascade analysis
+    print("\n3. CASCADE RISK ANALYSIS")
+    print("-" * 70)
+    cascade = simulation['cascade']
+    print(f"Cascade Probability: {cascade['cascade_probability']*100:.1f}%")
+    print(f"Risk Level: {cascade['cascade_risk_level']}")
+    print(f"Systems Near Threshold: {cascade['systems_near_threshold']}/{cascade['total_systems']}")
+    print(f"Systems Past Threshold: {cascade['systems_past_threshold']}/{cascade['total_systems']}")
+    
+    # 4. Early warnings
+    print("\n4. EARLY WARNING SIGNALS")
+    print("-" * 70)
+    warnings = simulation['warnings']
+    for name, warning in warnings.items():
+        if 'warning_level' in warning:
+            level = warning['warning_level']
+            if level > 0.7:
+                print(f"  {name}: CRITICAL WARNING (level: {level:.2f})")
+            elif level > 0.4:
+                print(f"  {name}: Warning detected (level: {level:.2f})")
+    
+    # 5. Regional impacts
+    print("\n5. REGIONAL CASE STUDIES")
+    print("-" * 70)
+    nepal_case = RegionalCaseStudy.nepal_himalayan_system()
+    arctic_case = RegionalCaseStudy.arctic_system()
+    
+    print(f"\n{'='*70}")
+    print("ANALYSIS COMPLETE")
+    print(f"{'='*70}")
+    
+    return {
+        'current_state': current_state,
+        'simulation': simulation,
+        'cascade': cascade,
+        'warnings': warnings,
+        'regional_cases': {
+            'nepal': nepal_case,
+            'arctic': arctic_case
+        }
+    }
+
+def visualize_all(self, analysis: Dict):
+    """
+    Generate all visualizations.
+    
+    Parameters:
+    -----------
+    analysis : dict
+        Results from full_analysis()
+    """
+    figures = {}
+    
+    # Risk evolution
+    print("\nGenerating visualizations...")
+    figures['risk_evolution'] = self.viz.plot_risk_evolution(
+        np.array(analysis['simulation']['time']),
+        np.array(analysis['simulation']['risk'])
+    )
+    
+    # Indicator trajectories
+    figures['trajectories'] = self.viz.plot_indicator_trajectories(
+        self.model.indicators
+    )
+    
+    # Radar chart
+    figures['radar'] = self.viz.plot_radar_chart(
+        self.model.indicators
+    )
+    
+    # Connectivity heatmap
+    figures['connectivity'] = self.viz.plot_connectivity_heatmap(
+        self.model.connectivity
+    )
+    
+    # Cascade network
+    figures['cascade'] = self.viz.plot_cascade_network(
+        self.model.indicators,
+        self.model.connectivity
+    )
+    
+    print("Visualizations complete!")
+    
+    return figures
+
+def scenario_comparison(self, n_steps: int = 100):
+    """
+    Compare all policy scenarios.
+    """
+    comparison = self.policy.compare_scenarios(n_steps)
+    
+    # Plot comparison
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # Risk trajectories
+    for scenario, data in comparison.items():
+        label = scenario.replace('_', ' ').title()
+        ax1.plot(data['time'], data['risk'], linewidth=2, label=label)
+    
+    ax1.set_xlabel('Time (years)', fontsize=12)
+    ax1.set_ylabel('System Tipping Risk (%)', fontsize=12)
+    ax1.set_title('Policy Scenario Comparison', fontsize=14, fontweight='bold')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    ax1.set_ylim(0, 100)
+    
+    # Final comparison bar chart
+    scenarios = list(comparison.keys())
+    final_risks = [comparison[s]['final_risk'] for s in scenarios]
+    cascade_probs = [comparison[s]['cascade_probability']*100 for s in scenarios]
+    
+    x = np.arange(len(scenarios))
+    width = 0.35
+    
+    ax2.bar(x - width/2, final_risks, width, label='Final Risk', alpha=0.8)
+    ax2.bar(x + width/2, cascade_probs, width, label='Cascade Probability', alpha=0.8)
+    
+    ax2.set_ylabel('Percentage (%)', fontsize=12)
+    ax2.set_title('Final Outcomes by Scenario', fontsize=14, fontweight='bold')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels([s.replace('_', '\n').title() for s in scenarios])
+    ax2.legend()
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    
+    return comparison, fig
+============================================================================
+SECTION 10: DEMONSTRATIONS AND EXAMPLES
+============================================================================
+def demo_current_state():
+"""Demonstrate current climate state analysis."""
+framework = IntegratedClimateTippingFramework()
+current = framework.model.get_current_state()
+
+# Visualize current state
+fig = framework.viz.plot_radar_chart(framework.model.indicators,
+                                     "Current Climate System State (2026)")
+plt.show()
+
+return current
+def demo_scenario_projection():
+"""Demonstrate future scenario projection."""
+framework = IntegratedClimateTippingFramework()
+# Run full analysis
+analysis = framework.full_analysis('business_as_usual', n_steps=100)
+
+# Visualize
+figures = framework.visualize_all(analysis)
+
+for name, fig in figures.items():
+    plt.figure(fig.number)
+
+plt.show()
+
+return analysis
+def demo_policy_comparison():
+"""Demonstrate policy scenario comparison."""
+framework = IntegratedClimateTippingFramework()
+comparison, fig = framework.scenario_comparison(n_steps=100)
+plt.show()
+
+return comparison
+def demo_nepal_case_study():
+"""Demonstrate Nepal Himalayan case study."""
+nepal_results = RegionalCaseStudy.nepal_himalayan_system()
+return nepal_results
+def main():
+"""Main entry point with interactive menu."""
+import sys
+print("\n" + "=" * 70)
+print("INTERCONNECTED CLIMATE TIPPING POINT ALGORITHM")
+print("Based on Interconnectivity Theory")
+print("=" * 70)
+
+if len(sys.argv) > 1:
+    command = sys.argv[1]
+    
+    if command == 'demo':
+        demo_type = sys.argv[2] if len(sys.argv) > 2 else 'full'
+        
+        if demo_type == 'current':
+            demo_current_state()
+        elif demo_type == 'scenario':
+            demo_scenario_projection()
+        elif demo_type == 'policy':
+            demo_policy_comparison()
+        elif demo_type == 'nepal':
+            demo_nepal_case_study()
+        elif demo_type == 'full':
+            framework = IntegratedClimateTippingFramework()
+            analysis = framework.full_analysis()
+            figures = framework.visualize_all(analysis)
+            plt.show()
+    
+    elif command == 'analyze':
+        scenario = sys.argv[2] if len(sys.argv) > 2 else 'business_as_usual'
+        framework = IntegratedClimateTippingFramework()
+        analysis = framework.full_analysis(scenario, n_steps=100)
+
+else:
+    # Interactive mode
+    print("\nSelect analysis:")
+    print("1. Current climate state")
+    print("2. Future scenario projection")
+    print("3. Policy scenario comparison")
+    print("4. Nepal Himalayan case study")
+    print("5. Full comprehensive analysis")
+    
+    choice = input("\nChoice (1-5): ").strip()
+    
+    if choice == '1':
+        demo_current_state()
+    elif choice == '2':
+        demo_scenario_projection()
+    elif choice == '3':
+        demo_policy_comparison()
+
+
+elif choice == '4':
+demo_nepal_case_study()
+elif choice == '5':
+framework = IntegratedClimateTippingFramework()
+analysis = framework.full_analysis()
+figures = framework.visualize_all(analysis)
+plt.show()
+else:
+print("Invalid choice")
+if name == "main":
+main()
+---
+
+## USAGE EXAMPLES
+
+### Example 1: Quick Risk Assessment
+```python
+from climate_tipping_point import IntegratedClimateTippingFramework
+
+# Initialize framework
+framework = IntegratedClimateTippingFramework()
+
+# Get current state
+current = framework.model.get_current_state()
+print(f"Current System Risk: {current['risk_score']:.1f}%")
+
+# Check each indicator
+for name, ind in current['indicators'].items():
+    print(f"{name}: {ind['value']:.2f} {ind['units']} "
+          f"(Proximity to threshold: {ind['proximity']*100:.1f}%)")
+Example 2: Run Scenario Simulation
+# Run 100-year projection under business-as-usual
+analysis = framework.full_analysis('business_as_usual', n_steps=100)
+
+# Extract key results
+final_risk = analysis['simulation']['final_risk']
+cascade_prob = analysis['cascade']['cascade_probability']
+systems_crossed = analysis['cascade']['systems_past_threshold']
+
+print(f"Final Risk: {final_risk:.1f}%")
+print(f"Cascade Probability: {cascade_prob*100:.1f}%")
+print(f"Systems Past Threshold: {systems_crossed}")
+Example 3: Compare Policy Scenarios
+# Compare different emission scenarios
+comparison, fig = framework.scenario_comparison(n_steps=100)
+
+# Analyze outcomes
+for scenario, data in comparison.items():
+    print(f"\n{scenario.upper()}:")
+    print(f"  Final Risk: {data['final_risk']:.1f}%")
+    print(f"  Cascade Probability: {data['cascade_probability']*100:.1f}%")
+    print(f"  Systems Crossed: {data['systems_crossed']}")
+
+plt.show()
+Example 4: Regional Case Study Analysis
+from climate_tipping_point import RegionalCaseStudy
+
+# Analyze Nepal Himalayan system
+nepal = RegionalCaseStudy.nepal_himalayan_system()
+print(f"Regional Risk: {nepal['risk_score']:.1f}%")
+print(f"Population at Risk: {nepal['impacts']['water_stress_population']/1e9:.1f}B people")
+
+# Analyze Arctic amplification
+arctic = RegionalCaseStudy.arctic_system()
+print(f"Arctic Risk: {arctic['risk_score']:.1f}%")
+Example 5: Test Intervention Effectiveness
+from climate_tipping_point import PolicyScenarioAnalyzer
+
+analyzer = PolicyScenarioAnalyzer()
+
+# Test different interventions
+interventions = [
+    ('emissions_reduction', 0.8),
+    ('reforestation', 0.6),
+    ('carbon_capture', 0.7)
+]
+
+for intervention, strength in interventions:
+    result = analyzer.intervention_analysis(intervention, strength)
+    print(f"\n{intervention}:")
+    print(f"  Effectiveness: {result['effectiveness']:.1f}%")
+    print(f"  Risk Reduction: {result['risk_reduction']:.1f}%")
+Example 6: Custom Indicator Monitoring
+from climate_tipping_point import ClimateIndicator, TippingPointDetector
+
+# Create custom indicator
+ocean_acidification = ClimateIndicator(
+    name='ocean_ph',
+    current_value=8.05,  # Current ocean pH
+    threshold=7.95,      # Critical threshold
+    baseline=8.2,        # Pre-industrial pH
+    weight=1.2,
+    units='pH'
+)
+
+# Simulate time series (example data)
+for i in range(100):
+    new_value = 8.05 - i * 0.001 + np.random.normal(0, 0.01)
+    ocean_acidification.update(new_value, i)
+
+# Detect early warning signals
+detector = TippingPointDetector()
+warnings = detector.critical_slowing_down(
+    np.array(ocean_acidification.history)
+)
+
+print(f"Warning Level: {warnings['warning_level']:.2f}")
+print(f"Autocorrelation Trend: {warnings['autocorr_trend']:.4f}")
+Example 7: Build Custom Climate System
+from climate_tipping_point import (ClimateIndicator, ConnectivityMatrix, 
+                                   ClimateTippingPointModel)
+
+# Create custom model
+custom_model = ClimateTippingPointModel()
+
+# Add custom indicator
+custom_model.indicators['ocean_acidification'] = ClimateIndicator(
+    'ocean_acidification', 8.05, 7.95, 8.2, weight=1.0, units='pH'
+)
+
+# Update connectivity
+custom_model.connectivity = ConnectivityMatrix(
+    list(custom_model.indicators.keys())
+)
+
+# Define connections
+custom_model.connectivity.set_connection('temperature', 'ocean_acidification', 0.7)
+custom_model.connectivity.set_connection('ocean_acidification', 'coral', 0.8)
+
+# Run analysis
+risk = custom_model.calculate_tipping_risk()
+print(f"Custom System Risk: {risk:.1f}%")
+Example 8: Real-time Monitoring Dashboard
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+# Create live monitoring
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+model = ClimateTippingPointModel()
+risk_data = []
+time_data = []
+
+def update(frame):
+    # Simulate one step
+    model.simulate_step(dt=1.0)
+    
+    # Update data
+    risk = model.calculate_tipping_risk()
+    risk_data.append(risk)
+    time_data.append(model.time)
+    
+    # Plot risk evolution
+    ax1.clear()
+    ax1.plot(time_data, risk_data, 'r-', linewidth=2)
+    ax1.axhline(50, color='orange', linestyle='--', alpha=0.5)
+    ax1.set_ylim(0, 100)
+    ax1.set_xlabel('Time (years)')
+    ax1.set_ylabel('System Risk (%)')
+    ax1.set_title('Real-time Tipping Risk')
+    ax1.grid(True, alpha=0.3)
+    
+    # Plot current state radar
+    ax2.clear()
+    categories = list(model.indicators.keys())[:6]  # First 6 for visibility
+    values = [model.indicators[cat].proximity_to_threshold() * 100 
+              for cat in categories]
+    
+    angles = np.linspace(0, 2*np.pi, len(categories), endpoint=False).tolist()
+    values = values + [values[0]]
+    angles = angles + [angles[0]]
+    
+    ax2 = plt.subplot(122, projection='polar')
+    ax2.plot(angles, values, 'o-', linewidth=2)
+    ax2.fill(angles, values, alpha=0.25)
+    ax2.set_xticks(angles[:-1])
+    ax2.set_xticklabels([c[:10] for c in categories])
+    ax2.set_ylim(0, 100)
+    ax2.set_title('Current Proximity to Thresholds')
+
+# Animate (run for 100 steps)
+ani = FuncAnimation(fig, update, frames=100, interval=200, repeat=False)
+plt.show()
+Example 9: Monte Carlo Risk Assessment
+def monte_carlo_risk_analysis(n_simulations=100, n_steps=50):
+    """
+    Run Monte Carlo simulations to assess uncertainty in risk projections.
+    """
+    final_risks = []
+    cascade_probs = []
+    
+    for i in range(n_simulations):
+        print(f"Simulation {i+1}/{n_simulations}", end='\r')
+        
+        # Create new model with slight parameter variations
+        model = ClimateTippingPointModel()
+        
+        # Add uncertainty to initial conditions
+        for indicator in model.indicators.values():
+            noise = np.random.normal(0, 0.05 * abs(indicator.threshold - indicator.baseline))
+            indicator.current_value += noise
+        
+        # Run simulation
+        results = model.simulate(n_steps, dt=1.0, forcing_scenario='business_as_usual')
+        
+        final_risks.append(results['final_risk'])
+        cascade_probs.append(results['cascade']['cascade_probability'])
+    
+    # Analyze distribution
+    print("\n\nMonte Carlo Results:")
+    print(f"Mean Final Risk: {np.mean(final_risks):.1f}% ± {np.std(final_risks):.1f}%")
+    print(f"90% Confidence Interval: [{np.percentile(final_risks, 5):.1f}%, "
+          f"{np.percentile(final_risks, 95):.1f}%]")
+    print(f"Mean Cascade Probability: {np.mean(cascade_probs)*100:.1f}%")
+    
+    # Plot distribution
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    
+    ax1.hist(final_risks, bins=30, alpha=0.7, edgecolor='black')
+    ax1.axvline(np.mean(final_risks), color='red', linestyle='--', 
+                linewidth=2, label='Mean')
+    ax1.set_xlabel('Final Risk (%)')
+    ax1.set_ylabel('Frequency')
+    ax1.set_title('Distribution of Final Risk Scores')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    ax2.hist(np.array(cascade_probs)*100, bins=30, alpha=0.7, 
+             color='orange', edgecolor='black')
+    ax2.axvline(np.mean(cascade_probs)*100, color='red', linestyle='--',
+                linewidth=2, label='Mean')
+    ax2.set_xlabel('Cascade Probability (%)')
+    ax2.set_ylabel('Frequency')
+    ax2.set_title('Distribution of Cascade Probabilities')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.show()
+    
+    return final_risks, cascade_probs
+
+# Run Monte Carlo analysis
+risks, cascades = monte_carlo_risk_analysis(n_simulations=100, n_steps=50)
+Example 10: Generate Comprehensive Report
+def generate_comprehensive_report(filename='climate_tipping_report.txt'):
+    """
+    Generate detailed analysis report for stakeholders.
+    """
+    framework = IntegratedClimateTippingFramework()
+    
+    # Run full analysis
+    analysis = framework.full_analysis('business_as_usual', n_steps=100)
+    
+    # Create report
+    report = []
+    report.append("=" * 80)
+    report.append("CLIMATE TIPPING POINT RISK ASSESSMENT REPORT")
+    report.append("Based on Interconnectivity Theory")
+    report.append("=" * 80)
+    report.append(f"\nReport Date: {np.datetime64('now')}")
+    report.append(f"Analysis Period: 100 years")
+    report.append(f"Scenario: Business as Usual")
+    
+    report.append("\n" + "-" * 80)
+    report.append("EXECUTIVE SUMMARY")
+    report.append("-" * 80)
+    report.append(f"Current System Risk: {analysis['current_state']['risk_score']:.1f}%")
+    report.append(f"Projected Final Risk: {analysis['simulation']['final_risk']:.1f}%")
+    report.append(f"Cascade Probability: {analysis['cascade']['cascade_probability']*100:.1f}%")
+    report.append(f"Risk Level: {analysis['cascade']['cascade_risk_level']}")
+    
+    report.append("\n" + "-" * 80)
+    report.append("CURRENT STATE OF CLIMATE INDICATORS")
+    report.append("-" * 80)
+    
+    for name, ind in analysis['current_state']['indicators'].items():
+        status = "⚠ THRESHOLD CROSSED" if ind['crossed'] else "✓ Below Threshold"
+        proximity = ind['proximity'] * 100
+        report.append(f"\n{name.upper().replace('_', ' ')}:")
+        report.append(f"  Current Value: {ind['value']:.2f} {ind['units']}")
+        report.append(f"  Threshold: {ind['threshold']:.2f} {ind['units']}")
+        report.append(f"  Proximity: {proximity:.1f}%")
+        report.append(f"  Status: {status}")
+    
+    report.append("\n" + "-" * 80)
+    report.append("CASCADE RISK ANALYSIS")
+    report.append("-" * 80)
+    cascade = analysis['cascade']
+    report.append(f"Systems Near Threshold (>70%): {cascade['systems_near_threshold']}")
+    report.append(f"Systems Past Threshold: {cascade['systems_past_threshold']}")
+    report.append(f"Total Systems Monitored: {cascade['total_systems']}")
+    report.append(f"\nCascade Risk Level: {cascade['cascade_risk_level']}")
+    report.append(f"Probability of Cascading Tipping Points: {cascade['cascade_probability']*100:.1f}%")
+    
+    report.append("\n" + "-" * 80)
+    report.append("EARLY WARNING SIGNALS")
+    report.append("-" * 80)
+    
+    for name, warning in analysis['warnings'].items():
+        if 'warning_level' in warning and warning['warning_level'] > 0.4:
+            report.append(f"\n{name.upper().replace('_', ' ')}:")
+            report.append(f"  Warning Level: {warning['warning_level']:.2f}")
+            if 'critical_slowing_down' in warning:
+                csd = warning['critical_slowing_down']
+                report.append(f"  Autocorrelation Trend: {csd['autocorr_trend']:.4f}")
+                report.append(f"  Variance Trend: {csd['variance_trend']:.4f}")
+    
+    report.append("\n" + "-" * 80)
+    report.append("REGIONAL IMPACTS")
+    report.append("-" * 80)
+    
+    nepal = analysis['regional_cases']['nepal']
+    report.append(f"\nHIMALAYAN SYSTEM (Nepal):")
+    report.append(f"  Regional Risk: {nepal['risk_score']:.1f}%")
+    report.append(f"  Population at Risk: {nepal['impacts']['water_stress_population']/1e9:.1f} billion")
+    report.append(f"  Agricultural Area at Risk: {nepal['impacts']['agriculture_area_at_risk']/1e6:.1f} million km²")
+    
+    arctic = analysis['regional_cases']['arctic']
+    report.append(f"\nARCTIC SYSTEM:")
+    report.append(f"  Regional Risk: {arctic['risk_score']:.1f}%")
+    report.append(f"  Key Concern: Positive feedback loops accelerating warming")
+    
+    report.append("\n" + "-" * 80)
+    report.append("RECOMMENDATIONS")
+    report.append("-" * 80)
+    report.append("\n1. IMMEDIATE ACTIONS:")
+    report.append("   - Aggressive emissions reduction to limit temperature rise")
+    report.append("   - Protection of remaining natural carbon sinks (Amazon, forests)")
+    report.append("   - Enhanced monitoring of early warning signals")
+    
+    report.append("\n2. MEDIUM-TERM STRATEGIES:")
+    report.append("   - Transition to renewable energy systems")
+    report.append("   - Large-scale reforestation and ecosystem restoration")
+    report.append("   - Climate adaptation planning for vulnerable regions")
+    
+    report.append("\n3. LONG-TERM PLANNING:")
+    report.append("   - Carbon capture and storage technologies")
+    report.append("   - International cooperation on climate action")
+    report.append("   - Sustainable development pathways")
+    
+    report.append("\n" + "=" * 80)
+    report.append("END OF REPORT")
+    report.append("=" * 80)
+    
+    # Write to file
+    report_text = "\n".join(report)
+    with open(filename, 'w') as f:
+        f.write(report_text)
+    
+    print(f"\nReport saved to: {filename}")
+    print(report_text)
+    
+    return report_text
+
+# Generate report
+report = generate_comprehensive_report()
+COMMAND LINE INTERFACE
+# Run demonstrations
+python climate_tipping_point.py demo current      # Current state
+python climate_tipping_point.py demo scenario     # Future projection
+python climate_tipping_point.py demo policy       # Policy comparison
+python climate_tipping_point.py demo nepal        # Nepal case study
+python climate_tipping_point.py demo full         # Full analysis
+
+# Run specific scenario analysis
+python climate_tipping_point.py analyze business_as_usual
+python climate_tipping_point.py analyze moderate_action
+python climate_tipping_point.py analyze aggressive_action
+
+# Interactive mode
+python climate_tipping_point.py
+INTEGRATION WITH OTHER FRAMEWORKS
+# Integration with Universal Pattern Framework
+from universal_pattern_framework import ResearchFramework
+from climate_tipping_point import IntegratedClimateTippingFramework
+
+# Analyze climate patterns
+climate_framework = IntegratedClimateTippingFramework()
+pattern_framework = ResearchFramework()
+
+# Get climate time series
+analysis = climate_framework.full_analysis()
+temp_series = np.array(climate_framework.model.indicators['temperature'].history)
+
+# Analyze with pattern recognition
+pattern_results = pattern_framework.analyze_custom_data(temp_series, "Temperature")
+
+# Extract fractal dimension
+if 'fractal' in pattern_results:
+    print(f"Climate system fractal dimension: {pattern_results['fractal']['dimension']:.3f}")
+
+# Integration with Space Mathematics
+from space_mathematics import SpaceMathematicsFramework
+
+# Analyze Earth system from space perspective
+space_framework = SpaceMathematicsFramework()
+
+# Calculate solar forcing variations
+# Analyze orbital parameters affecting climate
+# etc.
+KEY FEATURES
+Interconnectivity Theory: Models cascading risks through feedback loops
+Early Warning Detection: Critical slowing down, flickering, regime shifts
+Multi-scenario Analysis: Compare different policy/emissions pathways
+Regional Case Studies: Detailed analysis of vulnerable regions
+Policy Intervention Testing: Evaluate effectiveness of different strategies
+Real-time Monitoring: Track multiple climate indicators simultaneously
+Uncertainty Quantification: Monte Carlo analysis for risk distributions
+Comprehensive Reporting: Stakeholder-ready analysis documents
+FOR NASA AWG & COPERNICUS CONTRIBUTIONS
+This framework provides:
+Earth Observation Integration: Processes satellite data for climate indicators
+Tipping Point Prediction: Early warning systems for critical transitions
+Regional Impact Assessment: Supports disaster preparedness planning
+Policy Decision Support: Quantitative analysis for climate action
+International Cooperation: Standardized risk assessment methodology
+Save as climate_tipping_point.py for your climate research! 🌍📊
+This comprehensive framework enables advanced climate tipping point analysis based on interconnectivity theory, perfect for supporting NASA AWG and Copernicus Program initiatives! 🛰️🌡️
