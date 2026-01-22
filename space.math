@@ -1,0 +1,2529 @@
+"""
+Space Mathematics Framework
+Advanced computational tools for astrophysics, cosmology, orbital mechanics,
+and space mission planning. Integrates with Universal Pattern Framework
+for cosmic structure analysis.
+
+Developed for NASA AWG and Copernicus Program contributions.
+
+Author: [Your Name]
+Version: 1.0.0
+Date: January 2026
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import integrate, optimize, interpolate
+from scipy.spatial.distance import pdist, squareform
+from typing import List, Tuple, Dict, Optional, Union, Callable
+import warnings
+warnings.filterwarnings('ignore')
+
+# Physical Constants
+class PhysicalConstants:
+    """Fundamental physical constants in SI units."""
+    
+    # Universal Constants
+    c = 299792458.0                    # Speed of light (m/s)
+    G = 6.67430e-11                    # Gravitational constant (m³/kg/s²)
+    h = 6.62607015e-34                 # Planck constant (J⋅s)
+    hbar = 1.054571817e-34             # Reduced Planck constant (J⋅s)
+    k_B = 1.380649e-23                 # Boltzmann constant (J/K)
+    sigma = 5.670374419e-8             # Stefan-Boltzmann constant (W/m²/K⁴)
+    
+    # Astronomical Constants
+    AU = 1.495978707e11                # Astronomical Unit (m)
+    ly = 9.4607304725808e15            # Light year (m)
+    pc = 3.0856775814913673e16         # Parsec (m)
+    
+    # Solar System
+    M_sun = 1.98847e30                 # Solar mass (kg)
+    R_sun = 6.96340e8                  # Solar radius (m)
+    L_sun = 3.828e26                   # Solar luminosity (W)
+    
+    # Earth
+    M_earth = 5.97217e24               # Earth mass (kg)
+    R_earth = 6.371e6                  # Earth radius (m)
+    g_earth = 9.80665                  # Earth surface gravity (m/s²)
+    
+    # Cosmological
+    H0 = 67.4e3 / (1e6 * pc)          # Hubble constant (s⁻¹)
+    rho_crit = 8.53e-27                # Critical density (kg/m³)
+    Omega_m = 0.315                    # Matter density parameter
+    Omega_Lambda = 0.685               # Dark energy density parameter
+    
+    # Conversion Factors
+    km_to_m = 1000.0
+    deg_to_rad = np.pi / 180.0
+    rad_to_deg = 180.0 / np.pi
+    day_to_s = 86400.0
+    year_to_s = 31557600.0
+
+
+# ============================================================================
+# SECTION 1: ORBITAL MECHANICS
+# ============================================================================
+
+class OrbitalMechanics:
+    """
+    Classical and relativistic orbital mechanics calculations.
+    """
+    
+    @staticmethod
+    def kepler_elements(r: np.ndarray, v: np.ndarray, mu: float) -> Dict:
+        """
+        Calculate orbital elements from position and velocity vectors.
+        
+        Parameters:
+        -----------
+        r : np.ndarray
+            Position vector (m) [x, y, z]
+        v : np.ndarray
+            Velocity vector (m/s) [vx, vy, vz]
+        mu : float
+            Gravitational parameter μ = G*M (m³/s²)
+            
+        Returns:
+        --------
+        elements : dict
+            Orbital elements
+        """
+        # Magnitudes
+        r_mag = np.linalg.norm(r)
+        v_mag = np.linalg.norm(v)
+        
+        # Specific angular momentum
+        h = np.cross(r, v)
+        h_mag = np.linalg.norm(h)
+        
+        # Node vector
+        k_hat = np.array([0, 0, 1])
+        n = np.cross(k_hat, h)
+        n_mag = np.linalg.norm(n)
+        
+        # Eccentricity vector
+        e_vec = ((v_mag**2 - mu/r_mag) * r - np.dot(r, v) * v) / mu
+        e = np.linalg.norm(e_vec)
+        
+        # Specific energy
+        energy = v_mag**2 / 2 - mu / r_mag
+        
+        # Semi-major axis
+        if abs(e - 1.0) > 1e-10:  # Not parabolic
+            a = -mu / (2 * energy)
+        else:
+            a = np.inf
+        
+        # Inclination
+        i = np.arccos(h[2] / h_mag)
+        
+        # Right ascension of ascending node (RAAN)
+        if n_mag > 1e-10:
+            Omega = np.arccos(n[0] / n_mag)
+            if n[1] < 0:
+                Omega = 2*np.pi - Omega
+        else:
+            Omega = 0.0
+        
+        # Argument of periapsis
+        if n_mag > 1e-10 and e > 1e-10:
+            omega = np.arccos(np.dot(n, e_vec) / (n_mag * e))
+            if e_vec[2] < 0:
+                omega = 2*np.pi - omega
+        else:
+            omega = 0.0
+        
+        # True anomaly
+        if e > 1e-10:
+            nu = np.arccos(np.dot(e_vec, r) / (e * r_mag))
+            if np.dot(r, v) < 0:
+                nu = 2*np.pi - nu
+        else:
+            nu = 0.0
+        
+        # Orbital period
+        if a > 0 and e < 1:
+            T = 2 * np.pi * np.sqrt(a**3 / mu)
+        else:
+            T = np.inf
+        
+        return {
+            'a': a,                    # Semi-major axis (m)
+            'e': e,                    # Eccentricity
+            'i': i,                    # Inclination (rad)
+            'Omega': Omega,            # RAAN (rad)
+            'omega': omega,            # Argument of periapsis (rad)
+            'nu': nu,                  # True anomaly (rad)
+            'h': h_mag,                # Specific angular momentum (m²/s)
+            'energy': energy,          # Specific energy (J/kg)
+            'period': T                # Orbital period (s)
+        }
+    
+    @staticmethod
+    def elements_to_state(a: float, e: float, i: float, 
+                         Omega: float, omega: float, nu: float,
+                         mu: float) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Convert orbital elements to position and velocity vectors.
+        
+        Parameters:
+        -----------
+        a : float
+            Semi-major axis (m)
+        e : float
+            Eccentricity
+        i : float
+            Inclination (rad)
+        Omega : float
+            RAAN (rad)
+        omega : float
+            Argument of periapsis (rad)
+        nu : float
+            True anomaly (rad)
+        mu : float
+            Gravitational parameter (m³/s²)
+            
+        Returns:
+        --------
+        r : np.ndarray
+            Position vector (m)
+        v : np.ndarray
+            Velocity vector (m/s)
+        """
+        # Orbital radius
+        p = a * (1 - e**2)  # Semi-latus rectum
+        r_mag = p / (1 + e * np.cos(nu))
+        
+        # Position in perifocal frame
+        r_peri = r_mag * np.array([np.cos(nu), np.sin(nu), 0])
+        
+        # Velocity in perifocal frame
+        v_peri = np.sqrt(mu / p) * np.array([-np.sin(nu), e + np.cos(nu), 0])
+        
+        # Rotation matrices
+        R3_Omega = np.array([
+            [np.cos(Omega), -np.sin(Omega), 0],
+            [np.sin(Omega), np.cos(Omega), 0],
+            [0, 0, 1]
+        ])
+        
+        R1_i = np.array([
+            [1, 0, 0],
+            [0, np.cos(i), -np.sin(i)],
+            [0, np.sin(i), np.cos(i)]
+        ])
+        
+        R3_omega = np.array([
+            [np.cos(omega), -np.sin(omega), 0],
+            [np.sin(omega), np.cos(omega), 0],
+            [0, 0, 1]
+        ])
+        
+        # Perifocal to inertial transformation
+        Q = R3_Omega @ R1_i @ R3_omega
+        
+        # Transform to inertial frame
+        r = Q @ r_peri
+        v = Q @ v_peri
+        
+        return r, v
+    
+    @staticmethod
+    def solve_kepler(M: float, e: float, tol: float = 1e-10) -> float:
+        """
+        Solve Kepler's equation M = E - e*sin(E) for eccentric anomaly E.
+        
+        Uses Newton-Raphson iteration.
+        
+        Parameters:
+        -----------
+        M : float
+            Mean anomaly (rad)
+        e : float
+            Eccentricity
+        tol : float
+            Tolerance for convergence
+            
+        Returns:
+        --------
+        E : float
+            Eccentric anomaly (rad)
+        """
+        # Initial guess
+        if M < np.pi:
+            E = M + e/2
+        else:
+            E = M - e/2
+        
+        # Newton-Raphson iteration
+        max_iter = 100
+        for _ in range(max_iter):
+            f = E - e*np.sin(E) - M
+            fp = 1 - e*np.cos(E)
+            E_new = E - f/fp
+            
+            if abs(E_new - E) < tol:
+                return E_new
+            
+            E = E_new
+        
+        return E
+    
+    @staticmethod
+    def propagate_orbit(r0: np.ndarray, v0: np.ndarray, 
+                       mu: float, t: float) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Propagate orbit forward in time using Keplerian motion.
+        
+        Parameters:
+        -----------
+        r0 : np.ndarray
+            Initial position (m)
+        v0 : np.ndarray
+            Initial velocity (m/s)
+        mu : float
+            Gravitational parameter (m³/s²)
+        t : float
+            Time to propagate (s)
+            
+        Returns:
+        --------
+        r : np.ndarray
+            Final position (m)
+        v : np.ndarray
+            Final velocity (m/s)
+        """
+        # Get orbital elements
+        elements = OrbitalMechanics.kepler_elements(r0, v0, mu)
+        
+        # Mean motion
+        n = np.sqrt(mu / elements['a']**3)
+        
+        # Mean anomaly at initial and final times
+        E0 = OrbitalMechanics.solve_kepler(elements['nu'], elements['e'])
+        M0 = E0 - elements['e'] * np.sin(E0)
+        M = M0 + n * t
+        
+        # Solve for new eccentric anomaly
+        E = OrbitalMechanics.solve_kepler(M, elements['e'])
+        
+        # Convert to true anomaly
+        nu = 2 * np.arctan2(
+            np.sqrt(1 + elements['e']) * np.sin(E/2),
+            np.sqrt(1 - elements['e']) * np.cos(E/2)
+        )
+        
+        # Convert back to state vectors
+        r, v = OrbitalMechanics.elements_to_state(
+            elements['a'], elements['e'], elements['i'],
+            elements['Omega'], elements['omega'], nu, mu
+        )
+        
+        return r, v
+    
+    @staticmethod
+    def hohmann_transfer(r1: float, r2: float, mu: float) -> Dict:
+        """
+        Calculate Hohmann transfer orbit parameters.
+        
+        Parameters:
+        -----------
+        r1 : float
+            Initial circular orbit radius (m)
+        r2 : float
+            Final circular orbit radius (m)
+        mu : float
+            Gravitational parameter (m³/s²)
+            
+        Returns:
+        --------
+        transfer : dict
+            Transfer orbit parameters
+        """
+        # Velocities in circular orbits
+        v1_circ = np.sqrt(mu / r1)
+        v2_circ = np.sqrt(mu / r2)
+        
+        # Transfer orbit semi-major axis
+        a_transfer = (r1 + r2) / 2
+        
+        # Transfer orbit velocities at periapsis and apoapsis
+        v1_transfer = np.sqrt(mu * (2/r1 - 1/a_transfer))
+        v2_transfer = np.sqrt(mu * (2/r2 - 1/a_transfer))
+        
+        # Delta-v requirements
+        dv1 = v1_transfer - v1_circ  # Burn at r1
+        dv2 = v2_circ - v2_transfer  # Burn at r2
+        dv_total = abs(dv1) + abs(dv2)
+        
+        # Transfer time (half period of transfer ellipse)
+        t_transfer = np.pi * np.sqrt(a_transfer**3 / mu)
+        
+        return {
+            'a_transfer': a_transfer,
+            'v1_circ': v1_circ,
+            'v2_circ': v2_circ,
+            'v1_transfer': v1_transfer,
+            'v2_transfer': v2_transfer,
+            'dv1': dv1,
+            'dv2': dv2,
+            'dv_total': dv_total,
+            'transfer_time': t_transfer
+        }
+    
+    @staticmethod
+    def escape_velocity(r: float, mu: float) -> float:
+        """
+        Calculate escape velocity at given radius.
+        
+        v_esc = √(2μ/r)
+        
+        Parameters:
+        -----------
+        r : float
+            Distance from center (m)
+        mu : float
+            Gravitational parameter (m³/s²)
+            
+        Returns:
+        --------
+        v_esc : float
+            Escape velocity (m/s)
+        """
+        return np.sqrt(2 * mu / r)
+
+
+# ============================================================================
+# SECTION 2: CELESTIAL MECHANICS
+# ============================================================================
+
+class CelestialMechanics:
+    """
+    N-body dynamics, perturbations, and gravitational interactions.
+    """
+    
+    @staticmethod
+    def gravitational_force(m1: float, m2: float, r: np.ndarray) -> np.ndarray:
+        """
+        Calculate gravitational force between two masses.
+        
+        F = -G*m1*m2/r² * r̂
+        
+        Parameters:
+        -----------
+        m1, m2 : float
+            Masses (kg)
+        r : np.ndarray
+            Separation vector from m1 to m2 (m)
+            
+        Returns:
+        --------
+        F : np.ndarray
+            Force on m1 due to m2 (N)
+        """
+        r_mag = np.linalg.norm(r)
+        r_hat = r / r_mag
+        
+        F_mag = PhysicalConstants.G * m1 * m2 / r_mag**2
+        F = -F_mag * r_hat
+        
+        return F
+    
+    @staticmethod
+    def three_body_equations(t: float, state: np.ndarray, 
+                            masses: np.ndarray) -> np.ndarray:
+        """
+        Equations of motion for three-body problem.
+        
+        Parameters:
+        -----------
+        t : float
+            Time
+        state : np.ndarray
+            State vector [r1, r2, r3, v1, v2, v3] (18 elements)
+        masses : np.ndarray
+            Masses [m1, m2, m3]
+            
+        Returns:
+        --------
+        derivatives : np.ndarray
+            Time derivatives of state
+        """
+        # Unpack state
+        r1 = state[0:3]
+        r2 = state[3:6]
+        r3 = state[6:9]
+        v1 = state[9:12]
+        v2 = state[12:15]
+        v3 = state[15:18]
+        
+        m1, m2, m3 = masses
+        G = PhysicalConstants.G
+        
+        # Separation vectors
+        r12 = r2 - r1
+        r13 = r3 - r1
+        r23 = r3 - r2
+        
+        # Magnitudes
+        r12_mag = np.linalg.norm(r12)
+        r13_mag = np.linalg.norm(r13)
+        r23_mag = np.linalg.norm(r23)
+        
+        # Accelerations
+        a1 = G * (m2 * r12 / r12_mag**3 + m3 * r13 / r13_mag**3)
+        a2 = G * (m1 * (-r12) / r12_mag**3 + m3 * r23 / r23_mag**3)
+        a3 = G * (m1 * (-r13) / r13_mag**3 + m2 * (-r23) / r23_mag**3)
+        
+        # Pack derivatives
+        derivatives = np.concatenate([v1, v2, v3, a1, a2, a3])
+        
+        return derivatives
+    
+    @staticmethod
+    def simulate_three_body(masses: np.ndarray,
+                           initial_positions: np.ndarray,
+                           initial_velocities: np.ndarray,
+                           t_span: Tuple[float, float],
+                           n_points: int = 1000) -> Dict:
+        """
+        Simulate three-body system.
+        
+        Parameters:
+        -----------
+        masses : np.ndarray
+            Masses of three bodies (kg)
+        initial_positions : np.ndarray
+            Initial positions (3x3 array, m)
+        initial_velocities : np.ndarray
+            Initial velocities (3x3 array, m/s)
+        t_span : tuple
+            Time span (t_start, t_end) in seconds
+        n_points : int
+            Number of time points
+            
+        Returns:
+        --------
+        solution : dict
+            Simulation results
+        """
+        # Initial state
+        state0 = np.concatenate([
+            initial_positions.flatten(),
+            initial_velocities.flatten()
+        ])
+        
+        # Time points
+        t_eval = np.linspace(t_span[0], t_span[1], n_points)
+        
+        # Solve ODE
+        sol = integrate.solve_ivp(
+            lambda t, y: CelestialMechanics.three_body_equations(t, y, masses),
+            t_span,
+            state0,
+            t_eval=t_eval,
+            method='DOP853',  # High-order Runge-Kutta
+            rtol=1e-10,
+            atol=1e-12
+        )
+        
+        # Extract trajectories
+        r1 = sol.y[0:3, :].T
+        r2 = sol.y[3:6, :].T
+        r3 = sol.y[6:9, :].T
+        
+        return {
+            'time': sol.t,
+            'positions': [r1, r2, r3],
+            'masses': masses,
+            'success': sol.success
+        }
+    
+    @staticmethod
+    def lagrange_points(m1: float, m2: float, d: float) -> Dict:
+        """
+        Calculate positions of five Lagrange points in circular restricted 3-body problem.
+        
+        Parameters:
+        -----------
+        m1 : float
+            Mass of primary body (kg)
+        m2 : float
+            Mass of secondary body (kg)
+        d : float
+            Distance between bodies (m)
+            
+        Returns:
+        --------
+        points : dict
+            Lagrange point positions
+        """
+        # Mass ratio
+        mu = m2 / (m1 + m2)
+        
+        # L1 (between the masses)
+        def f_L1(r):
+            return (1-mu)/(r**2) - mu/((d-r)**2) - r
+        
+        r_L1 = optimize.brentq(f_L1, 0.01*d, 0.99*d)
+        L1 = np.array([r_L1 - mu*d, 0, 0])
+        
+        # L2 (beyond m2)
+        def f_L2(r):
+            return (1-mu)/(r**2) + mu/((r-d)**2) - r
+        
+        r_L2 = optimize.brentq(f_L2, d*1.01, d*2)
+        L2 = np.array([r_L2 - mu*d, 0, 0])
+        
+        # L3 (beyond m1)
+        def f_L3(r):
+            return (1-mu)/(r**2) + mu/((d+r)**2) + r
+        
+        r_L3 = optimize.brentq(f_L3, 0.01*d, d*2)
+        L3 = np.array([-r_L3 - mu*d, 0, 0])
+        
+        # L4 and L5 (equilateral triangles)
+        L4 = np.array([(0.5 - mu)*d, np.sqrt(3)/2*d, 0])
+        L5 = np.array([(0.5 - mu)*d, -np.sqrt(3)/2*d, 0])
+        
+        return {
+            'L1': L1,
+            'L2': L2,
+            'L3': L3,
+            'L4': L4,
+            'L5': L5
+        }
+
+
+# ============================================================================
+# SECTION 3: COSMOLOGY AND UNIVERSE DYNAMICS
+# ============================================================================
+
+class Cosmology:
+    """
+    Cosmological calculations and universe evolution.
+    """
+    
+    @staticmethod
+    def hubble_parameter(z: float, H0: float = None, 
+                        Omega_m: float = None, 
+                        Omega_Lambda: float = None) -> float:
+        """
+        Calculate Hubble parameter at redshift z.
+        
+        H(z) = H₀√[Ω_m(1+z)³ + Ω_Λ]
+        
+        Parameters:
+        -----------
+        z : float
+            Redshift
+        H0 : float
+            Hubble constant at z=0 (default from PhysicalConstants)
+        Omega_m : float
+            Matter density parameter
+        Omega_Lambda : float
+            Dark energy density parameter
+            
+        Returns:
+        --------
+        H : float
+            Hubble parameter (s⁻¹)
+        """
+        if H0 is None:
+            H0 = PhysicalConstants.H0
+        if Omega_m is None:
+            Omega_m = PhysicalConstants.Omega_m
+        if Omega_Lambda is None:
+            Omega_Lambda = PhysicalConstants.Omega_Lambda
+        
+        Omega_k = 1 - Omega_m - Omega_Lambda  # Curvature
+        
+        H = H0 * np.sqrt(
+            Omega_m * (1 + z)**3 + 
+            Omega_k * (1 + z)**2 + 
+            Omega_Lambda
+        )
+        
+        return H
+    
+    @staticmethod
+    def comoving_distance(z: float) -> float:
+        """
+        Calculate comoving distance to redshift z.
+        
+        d_c = c∫₀ᶻ dz'/H(z')
+        
+        Parameters:
+        -----------
+        z : float
+            Redshift
+            
+        Returns:
+        --------
+        d_c : float
+            Comoving distance (m)
+        """
+        c = PhysicalConstants.c
+        
+        # Integrand
+        def integrand(z_prime):
+            return c / Cosmology.hubble_parameter(z_prime)
+        
+        # Integrate
+        d_c, _ = integrate.quad(integrand, 0, z)
+        
+        return d_c
+    
+    @staticmethod
+    def luminosity_distance(z: float) -> float:
+        """
+        Calculate luminosity distance to redshift z.
+        
+        d_L = (1 + z) * d_c
+        
+        Parameters:
+        -----------
+        z : float
+            Redshift
+            
+        Returns:
+        --------
+        d_L : float
+            Luminosity distance (m)
+        """
+        d_c = Cosmology.comoving_distance(z)
+        d_L = (1 + z) * d_c
+        
+        return d_L
+    
+    @staticmethod
+    def angular_diameter_distance(z: float) -> float:
+        """
+        Calculate angular diameter distance to redshift z.
+        
+        d_A = d_c / (1 + z)
+        
+        Parameters:
+        -----------
+        z : float
+            Redshift
+            
+        Returns:
+        --------
+        d_A : float
+            Angular diameter distance (m)
+        """
+        d_c = Cosmology.comoving_distance(z)
+        d_A = d_c / (1 + z)
+        
+        return d_A
+    
+    @staticmethod
+    def lookback_time(z: float) -> float:
+        """
+        Calculate lookback time to redshift z.
+        
+        t_lookback = ∫₀ᶻ dz'/[(1+z')H(z')]
+        
+        Parameters:
+        -----------
+        z : float
+            Redshift
+            
+        Returns:
+        --------
+        t : float
+            Lookback time (s)
+        """
+        def integrand(z_prime):
+            return 1 / ((1 + z_prime) * Cosmology.hubble_parameter(z_prime))
+        
+        t, _ = integrate.quad(integrand, 0, z)
+        
+        return t
+    
+    @staticmethod
+    def age_of_universe(z: float = 0) -> float:
+        """
+        Calculate age of universe at redshift z.
+        
+        For z=0, gives current age.
+        
+        Parameters:
+        -----------
+        z : float
+            Redshift
+            
+        Returns:
+        --------
+        age : float
+            Age of universe (s)
+        """
+        # Age is integral from z to infinity
+        def integrand(z_prime):
+            return 1 / ((1 + z_prime) * Cosmology.hubble_parameter(z_prime))
+        
+        age, _ = integrate.quad(integrand, z, 1000)  # 1000 ~ infinity for practical purposes
+        
+        return age
+    
+    @staticmethod
+    def critical_density(z: float = 0) -> float:
+        """
+        Calculate critical density at redshift z.
+        
+        ρ_crit = 3H²/(8πG)
+        
+        Parameters:
+        -----------
+        z : float
+            Redshift
+            
+        Returns:
+        --------
+        rho_crit : float
+            Critical density (kg/m³)
+        """
+        H = Cosmology.hubble_parameter(z)
+        G = PhysicalConstants.G
+        
+        rho_crit = 3 * H**2 / (8 * np.pi * G)
+        
+        return rho_crit
+    
+    @staticmethod
+    def friedmann_equation(a: float, Omega_m: float = None, 
+                          Omega_Lambda: float = None) -> float:
+        """
+        Friedmann equation for scale factor evolution.
+        
+        (ȧ/a)² = H₀²[Ω_m*a⁻³ + Ω_Λ]
+        
+        Parameters:
+        -----------
+        a : float
+            Scale factor (a=1 today)
+        Omega_m : float
+            Matter density parameter
+        Omega_Lambda : float
+            Dark energy density parameter
+            
+        Returns:
+        --------
+        H_a : float
+            Hubble parameter at scale factor a (s⁻¹)
+        """
+        if Omega_m is None:
+            Omega_m = PhysicalConstants.Omega_m
+        if Omega_Lambda is None:
+            Omega_Lambda = PhysicalConstants.Omega_Lambda
+        
+        H0 = PhysicalConstants.H0
+        
+        H_a = H0 * np.sqrt(Omega_m / a**3 + Omega_Lambda)
+        
+        return H_a
+
+
+# ============================================================================
+# SECTION 4: STELLAR ASTROPHYSICS
+# ============================================================================
+
+class StellarPhysics:
+    """
+    Stellar structure, evolution, and properties.
+    """
+    
+    @staticmethod
+    def main_sequence_mass_luminosity(M: float) -> float:
+        """
+        Main sequence mass-luminosity relation.
+        
+        L/L☉ ≈ (M/M☉)^α
+        where α ≈ 3.5 for solar-mass stars
+        
+        Parameters:
+        -----------
+        M : float
+            Stellar mass (kg)
+            
+        Returns:
+        --------
+        L : float
+            Luminosity (W)
+        """
+        M_sun = PhysicalConstants.M_sun
+        L_sun = PhysicalConstants.L_sun
+        
+        M_ratio = M / M_sun
+        
+        # Piecewise power law
+        if M_ratio < 0.43:
+            alpha = 2.3
+        elif M_ratio < 2:
+            alpha = 4.0
+        elif M_ratio < 20:
+            alpha = 3.5
+        else:
+            alpha = 1.0
+        
+        L = L_sun * M_ratio**alpha
+        
+        return L
+    
+    @staticmethod
+    def main_sequence_lifetime(M: float) -> float:
+        """
+        Estimate main sequence lifetime.
+        
+        t_MS ≈ 10¹⁰ years * (M/M☉) / (L/L☉)
+        
+        Parameters:
+        -----------
+        M : float
+            Stellar mass (kg)
+            
+        Returns:
+        --------
+        t_MS : float
+            Main sequence lifetime (s)
+        """
+        M_sun = PhysicalConstants.M_sun
+        L_sun = PhysicalConstants.L_sun
+        year = PhysicalConstants.year_to_s
+        
+        L = StellarPhysics.main_sequence_mass_luminosity(M)
+        
+        M_ratio = M / M_sun
+        L_ratio = L / L_sun
+        
+        t_MS = 1e10 * year * M_ratio / L_ratio
+        
+        return t_MS
+    
+    @staticmethod
+    def blackbody_spectrum(wavelength: np.ndarray, T: float) -> np.ndarray:
+        """
+        Planck blackbody spectrum.
+        
+        B_λ = (2hc²/λ⁵) / [exp(hc/λk_BT) - 1]
+        
+        Parameters:
+        -----------
+        wavelength : np.ndarray
+            Wavelength (m)
+        T : float
+
+
+Temperature (K)
+Returns:
+    --------
+    B_lambda : np.ndarray
+        Spectral radiance (W/m²/sr/m)
+    """
+    h = PhysicalConstants.h
+    c = PhysicalConstants.c
+    k_B = PhysicalConstants.k_B
+    
+    # Planck function
+    numerator = 2 * h * c**2 / wavelength**5
+    exponent = h * c / (wavelength * k_B * T)
+    denominator = np.exp(exponent) - 1
+    
+    B_lambda = numerator / denominator
+    
+    return B_lambda
+
+@staticmethod
+def wien_displacement_law(T: float) -> float:
+    """
+    Wien's displacement law: λ_max * T = constant.
+    
+    Parameters:
+    -----------
+    T : float
+        Temperature (K)
+        
+    Returns:
+    --------
+    lambda_max : float
+        Peak wavelength (m)
+    """
+    b = 2.897771955e-3  # Wien's displacement constant (m⋅K)
+    lambda_max = b / T
+    return lambda_max
+
+@staticmethod
+def stefan_boltzmann_law(T: float, R: float) -> float:
+    """
+    Stefan-Boltzmann law for stellar luminosity.
+    
+    L = 4πR²σT⁴
+    
+    Parameters:
+    -----------
+    T : float
+        Surface temperature (K)
+    R : float
+        Stellar radius (m)
+        
+    Returns:
+    --------
+    L : float
+        Luminosity (W)
+    """
+    sigma = PhysicalConstants.sigma
+    L = 4 * np.pi * R**2 * sigma * T**4
+    return L
+
+@staticmethod
+def eddington_luminosity(M: float) -> float:
+    """
+    Calculate Eddington luminosity (maximum for radiation pressure balance).
+    
+    L_Edd = 4πGMc / κ
+    where κ ≈ 0.34 m²/kg (Thomson scattering opacity)
+    
+    Parameters:
+    -----------
+    M : float
+        Mass (kg)
+        
+    Returns:
+    --------
+    L_Edd : float
+        Eddington luminosity (W)
+    """
+    G = PhysicalConstants.G
+    c = PhysicalConstants.c
+    kappa = 0.34  # Thomson scattering opacity (m²/kg)
+    
+    L_Edd = 4 * np.pi * G * M * c / kappa
+    
+    return L_Edd
+
+@staticmethod
+def schwarzschild_radius(M: float) -> float:
+    """
+    Calculate Schwarzschild radius (black hole event horizon).
+    
+    r_s = 2GM/c²
+    
+    Parameters:
+    -----------
+    M : float
+        Mass (kg)
+        
+    Returns:
+    --------
+    r_s : float
+        Schwarzschild radius (m)
+    """
+    G = PhysicalConstants.G
+    c = PhysicalConstants.c
+    
+    r_s = 2 * G * M / c**2
+    
+    return r_s
+
+@staticmethod
+def chandrasekhar_limit() -> float:
+    """
+    Chandrasekhar mass limit for white dwarfs.
+    
+    Returns:
+    --------
+    M_Ch : float
+        Chandrasekhar mass (kg)
+    """
+    M_sun = PhysicalConstants.M_sun
+    M_Ch = 1.44 * M_sun  # Approximately
+    return M_Ch
+============================================================================
+SECTION 5: GRAVITATIONAL PHYSICS
+============================================================================
+class RelativisticGravity:
+"""
+General relativistic calculations and gravitational phenomena.
+"""
+@staticmethod
+def gravitational_time_dilation(r: float, M: float) -> float:
+    """
+    Time dilation factor in Schwarzschild metric.
+    
+    t_∞ / t_r = √(1 - 2GM/rc²)
+    
+    Parameters:
+    -----------
+    r : float
+        Radial distance from mass (m)
+    M : float
+        Mass (kg)
+        
+    Returns:
+    --------
+    gamma : float
+        Time dilation factor
+    """
+    G = PhysicalConstants.G
+    c = PhysicalConstants.c
+    
+    r_s = 2 * G * M / c**2
+    
+    if r <= r_s:
+        return np.inf  # At or inside event horizon
+    
+    gamma = 1 / np.sqrt(1 - r_s / r)
+    
+    return gamma
+
+@staticmethod
+def gravitational_redshift(r1: float, r2: float, M: float) -> float:
+    """
+    Gravitational redshift between two radii.
+    
+    1 + z = √[(1 - r_s/r2)/(1 - r_s/r1)]
+    
+    Parameters:
+    -----------
+    r1 : float
+        Emission radius (m)
+    r2 : float
+        Observation radius (m)
+    M : float
+        Mass (kg)
+        
+    Returns:
+    --------
+    z : float
+        Redshift
+    """
+    G = PhysicalConstants.G
+    c = PhysicalConstants.c
+    
+    r_s = 2 * G * M / c**2
+    
+    z = np.sqrt((1 - r_s/r2) / (1 - r_s/r1)) - 1
+    
+    return z
+
+@staticmethod
+def gravitational_wave_strain(M1: float, M2: float, 
+                              r: float, f: float) -> float:
+    """
+    Estimate gravitational wave strain amplitude for binary system.
+    
+    h ~ (G/c⁴) * (M_chirp^(5/3) * (πf)^(2/3)) / r
+    
+    Parameters:
+    -----------
+    M1, M2 : float
+        Component masses (kg)
+    r : float
+        Distance to source (m)
+    f : float
+        Gravitational wave frequency (Hz)
+        
+    Returns:
+    --------
+    h : float
+        Strain amplitude (dimensionless)
+    """
+    G = PhysicalConstants.G
+    c = PhysicalConstants.c
+    
+    # Chirp mass
+    M_chirp = (M1 * M2)**(3/5) / (M1 + M2)**(1/5)
+    
+    # Strain amplitude
+    h = (G / c**4) * (M_chirp**(5/3) * (np.pi * f)**(2/3)) / r
+    
+    return h
+
+@staticmethod
+def orbital_decay_gw(M1: float, M2: float, a: float) -> float:
+    """
+    Orbital decay rate due to gravitational wave emission.
+    
+    da/dt = -64G³/(5c⁵) * (M1*M2*(M1+M2)/a³)
+    
+    Parameters:
+    -----------
+    M1, M2 : float
+        Component masses (kg)
+    a : float
+        Semi-major axis (m)
+        
+    Returns:
+    --------
+    da_dt : float
+        Rate of orbital decay (m/s)
+    """
+    G = PhysicalConstants.G
+    c = PhysicalConstants.c
+    
+    da_dt = -64 * G**3 / (5 * c**5) * M1 * M2 * (M1 + M2) / a**3
+    
+    return da_dt
+
+@staticmethod
+def merger_time_gw(M1: float, M2: float, a0: float) -> float:
+    """
+    Estimate time until merger due to gravitational wave emission.
+    
+    Parameters:
+    -----------
+    M1, M2 : float
+        Component masses (kg)
+    a0 : float
+        Initial semi-major axis (m)
+        
+    Returns:
+    --------
+    t_merge : float
+        Time to merger (s)
+    """
+    G = PhysicalConstants.G
+    c = PhysicalConstants.c
+    
+    # Reduced mass
+    mu = M1 * M2 / (M1 + M2)
+    M_total = M1 + M2
+    
+    # Peters formula
+    t_merge = (5 / 256) * (c**5 / G**3) * (a0**4 / (mu * M_total**2))
+    
+    return t_merge
+
+@staticmethod
+def photon_sphere_radius(M: float) -> float:
+    """
+    Radius of photon sphere around black hole.
+    
+    r_ph = 3GM/c²
+    
+    Parameters:
+    -----------
+    M : float
+        Black hole mass (kg)
+        
+    Returns:
+    --------
+    r_ph : float
+        Photon sphere radius (m)
+    """
+    return 3 * PhysicalConstants.G * M / PhysicalConstants.c**2
+
+@staticmethod
+def innermost_stable_circular_orbit(M: float) -> float:
+    """
+    ISCO radius for Schwarzschild black hole.
+    
+    r_ISCO = 6GM/c²
+    
+    Parameters:
+    -----------
+    M : float
+        Black hole mass (kg)
+        
+    Returns:
+    --------
+    r_ISCO : float
+        ISCO radius (m)
+    """
+    return 6 * PhysicalConstants.G * M / PhysicalConstants.c**2
+============================================================================
+SECTION 6: SPACE MISSION PLANNING
+============================================================================
+class MissionPlanning:
+"""
+Tools for space mission design and trajectory planning.
+"""
+@staticmethod
+def delta_v_budget(transfers: List[Dict]) -> Dict:
+    """
+    Calculate total Δv budget for mission.
+    
+    Parameters:
+    -----------
+    transfers : list of dict
+        Each dict contains transfer parameters
+        
+    Returns:
+    --------
+    budget : dict
+        Total Δv and breakdown
+    """
+    total_dv = 0
+    breakdown = []
+    
+    for i, transfer in enumerate(transfers):
+        dv = transfer.get('delta_v', 0)
+        total_dv += dv
+        breakdown.append({
+            'maneuver': i + 1,
+            'description': transfer.get('description', f'Maneuver {i+1}'),
+            'delta_v': dv
+        })
+    
+    return {
+        'total_delta_v': total_dv,
+        'breakdown': breakdown
+    }
+
+@staticmethod
+def tsiolkovsky_rocket_equation(delta_v: float, 
+                               isp: float,
+                               m_payload: float) -> float:
+    """
+    Calculate required propellant mass using rocket equation.
+    
+    Δv = I_sp * g₀ * ln(m_initial / m_final)
+    
+    Parameters:
+    -----------
+    delta_v : float
+        Required velocity change (m/s)
+    isp : float
+        Specific impulse (s)
+    m_payload : float
+        Payload mass (kg)
+        
+    Returns:
+    --------
+    m_propellant : float
+        Required propellant mass (kg)
+    """
+    g0 = PhysicalConstants.g_earth
+    
+    # Mass ratio
+    mass_ratio = np.exp(delta_v / (isp * g0))
+    
+    # m_initial = m_final * mass_ratio
+    # m_propellant = m_initial - m_final = m_final * (mass_ratio - 1)
+    m_propellant = m_payload * (mass_ratio - 1)
+    
+    return m_propellant
+
+@staticmethod
+def porkchop_plot(departure_planet: str,
+                 arrival_planet: str,
+                 departure_dates: np.ndarray,
+                 arrival_dates: np.ndarray) -> Dict:
+    """
+    Generate porkchop plot data for interplanetary transfer.
+    
+    Simplified version using patched conics.
+    
+    Parameters:
+    -----------
+    departure_planet : str
+        Name of departure planet
+    arrival_planet : str
+        Name of arrival planet
+    departure_dates : np.ndarray
+        Array of departure Julian dates
+    arrival_dates : np.ndarray
+        Array of arrival Julian dates
+        
+    Returns:
+    --------
+    porkchop : dict
+        Transfer parameters grid
+    """
+    # Simplified planetary data (circular orbits)
+    planets = {
+        'Earth': {'a': 1.0 * PhysicalConstants.AU, 'T': 365.25},
+        'Mars': {'a': 1.524 * PhysicalConstants.AU, 'T': 687.0},
+        'Venus': {'a': 0.723 * PhysicalConstants.AU, 'T': 224.7},
+        'Jupiter': {'a': 5.203 * PhysicalConstants.AU, 'T': 4332.6}
+    }
+    
+    mu_sun = PhysicalConstants.G * PhysicalConstants.M_sun
+    
+    # Initialize grids
+    n_dep = len(departure_dates)
+    n_arr = len(arrival_dates)
+    
+    c3_departure = np.zeros((n_dep, n_arr))
+    c3_arrival = np.zeros((n_dep, n_arr))
+    transfer_time = np.zeros((n_dep, n_arr))
+    
+    for i, t_dep in enumerate(departure_dates):
+        for j, t_arr in enumerate(arrival_dates):
+            if t_arr <= t_dep:
+                c3_departure[i, j] = np.nan
+                c3_arrival[i, j] = np.nan
+                transfer_time[i, j] = np.nan
+                continue
+            
+            # Transfer time
+            dt = t_arr - t_dep
+            transfer_time[i, j] = dt
+            
+            # Simplified calculation (assumes coplanar circular orbits)
+            r1 = planets[departure_planet]['a']
+            r2 = planets[arrival_planet]['a']
+            
+            # Hohmann-like transfer
+            a_transfer = (r1 + r2) / 2
+            
+            # Velocities
+            v1_circ = np.sqrt(mu_sun / r1)
+            v1_transfer = np.sqrt(mu_sun * (2/r1 - 1/a_transfer))
+            
+            v2_circ = np.sqrt(mu_sun / r2)
+            v2_transfer = np.sqrt(mu_sun * (2/r2 - 1/a_transfer))
+            
+            # C3 (characteristic energy) = v²
+            c3_departure[i, j] = (v1_transfer - v1_circ)**2
+            c3_arrival[i, j] = (v2_circ - v2_transfer)**2
+    
+    return {
+        'c3_departure': c3_departure,
+        'c3_arrival': c3_arrival,
+        'transfer_time': transfer_time,
+        'departure_dates': departure_dates,
+        'arrival_dates': arrival_dates
+    }
+
+@staticmethod
+def sphere_of_influence(m_planet: float, a_orbit: float, 
+                       m_star: float) -> float:
+    """
+    Calculate sphere of influence radius for planet.
+    
+    r_SOI ≈ a * (m_planet / m_star)^(2/5)
+    
+    Parameters:
+    -----------
+    m_planet : float
+        Planet mass (kg)
+    a_orbit : float
+        Orbital semi-major axis (m)
+    m_star : float
+        Star mass (kg)
+        
+    Returns:
+    --------
+    r_SOI : float
+        Sphere of influence radius (m)
+    """
+    r_SOI = a_orbit * (m_planet / m_star)**(2/5)
+    return r_SOI
+
+@staticmethod
+def gravity_assist_delta_v(v_inf_in: float, v_inf_out: float, 
+                           delta: float) -> float:
+    """
+    Calculate effective Δv from gravity assist.
+    
+    Parameters:
+    -----------
+    v_inf_in : float
+        Incoming hyperbolic excess velocity (m/s)
+    v_inf_out : float
+        Outgoing hyperbolic excess velocity (m/s)
+    delta : float
+        Turn angle (rad)
+        
+    Returns:
+    --------
+    delta_v_eff : float
+        Effective Δv (m/s)
+    """
+    # Vector change in velocity
+    delta_v_eff = np.sqrt(v_inf_in**2 + v_inf_out**2 - 
+                         2*v_inf_in*v_inf_out*np.cos(delta))
+    
+    return delta_v_eff
+============================================================================
+SECTION 7: SPACE ENVIRONMENT
+============================================================================
+class SpaceEnvironment:
+"""
+Space weather, radiation, and environmental effects.
+"""
+@staticmethod
+def solar_wind_pressure(n: float, v: float, T: float) -> float:
+    """
+    Calculate solar wind dynamic pressure.
+    
+    P = n*m_p*v² + 2nkT
+    
+    Parameters:
+    -----------
+    n : float
+        Particle density (particles/m³)
+    v : float
+        Velocity (m/s)
+    T : float
+        Temperature (K)
+        
+    Returns:
+    --------
+    P : float
+        Pressure (Pa)
+    """
+    m_p = 1.67262192e-27  # Proton mass (kg)
+    k_B = PhysicalConstants.k_B
+    
+    P_dynamic = n * m_p * v**2
+    P_thermal = 2 * n * k_B * T
+    
+    P = P_dynamic + P_thermal
+    
+    return P
+
+@staticmethod
+def radiation_dose(flux: float, energy: float, 
+                  time: float, mass: float) -> float:
+    """
+    Estimate radiation dose.
+    
+    Parameters:
+    -----------
+    flux : float
+        Particle flux (particles/m²/s)
+    energy : float
+        Particle energy (J)
+    time : float
+        Exposure time (s)
+    mass : float
+        Mass of target (kg)
+        
+    Returns:
+    --------
+    dose : float
+        Absorbed dose (Gy = J/kg)
+    """
+    # Total energy deposited
+    E_total = flux * energy * time
+    
+    # Dose (simplified, assumes all energy absorbed)
+    dose = E_total / mass
+    
+    return dose
+
+@staticmethod
+def atmospheric_drag(rho: float, v: float, 
+                    C_d: float, A: float, m: float) -> float:
+    """
+    Calculate atmospheric drag acceleration.
+    
+    a_drag = -½ρv²C_d A / m
+    
+    Parameters:
+    -----------
+    rho : float
+        Atmospheric density (kg/m³)
+    v : float
+        Velocity (m/s)
+    C_d : float
+        Drag coefficient
+    A : float
+        Cross-sectional area (m²)
+    m : float
+        Mass (kg)
+        
+    Returns:
+    --------
+    a_drag : float
+        Drag acceleration magnitude (m/s²)
+    """
+    a_drag = 0.5 * rho * v**2 * C_d * A / m
+    
+    return a_drag
+
+@staticmethod
+def exponential_atmosphere(h: float, h0: float = 0, 
+                          rho0: float = 1.225,
+                          H: float = 8500) -> float:
+    """
+    Exponential atmospheric density model.
+    
+    ρ = ρ₀ * exp(-(h-h₀)/H)
+    
+    Parameters:
+    -----------
+    h : float
+        Altitude (m)
+    h0 : float
+        Reference altitude (m)
+    rho0 : float
+        Density at h0 (kg/m³)
+    H : float
+        Scale height (m)
+        
+    Returns:
+    --------
+    rho : float
+        Density at altitude h (kg/m³)
+    """
+    rho = rho0 * np.exp(-(h - h0) / H)
+    
+    return rho
+============================================================================
+SECTION 8: SPACE GEOMETRY AND TRANSFORMATIONS
+============================================================================
+class SpaceGeometry:
+"""
+Coordinate transformations and geometric calculations.
+"""
+@staticmethod
+def cartesian_to_spherical(x: float, y: float, z: float) -> Tuple[float, float, float]:
+    """
+    Convert Cartesian to spherical coordinates.
+    
+    Parameters:
+    -----------
+    x, y, z : float
+        Cartesian coordinates
+        
+    Returns:
+    --------
+    r : float
+        Radius
+    theta : float
+        Polar angle (rad)
+    phi : float
+        Azimuthal angle (rad)
+    """
+    r = np.sqrt(x**2 + y**2 + z**2)
+    theta = np.arccos(z / r) if r > 0 else 0
+    phi = np.arctan2(y, x)
+    
+    return r, theta, phi
+
+@staticmethod
+def spherical_to_cartesian(r: float, theta: float, phi: float) -> Tuple[float, float, float]:
+    """
+    Convert spherical to Cartesian coordinates.
+    
+    Parameters:
+    -----------
+    r : float
+        Radius
+    theta : float
+        Polar angle (rad)
+    phi : float
+        Azimuthal angle (rad)
+        
+    Returns:
+    --------
+    x, y, z : float
+        Cartesian coordinates
+    """
+    x = r * np.sin(theta) * np.cos(phi)
+    y = r * np.sin(theta) * np.sin(phi)
+    z = r * np.cos(theta)
+    
+    return x, y, z
+
+@staticmethod
+def rotation_matrix(axis: str, angle: float) -> np.ndarray:
+    """
+    Generate rotation matrix.
+    
+    Parameters:
+    -----------
+    axis : str
+        'x', 'y', or 'z'
+    angle : float
+        Rotation angle (rad)
+        
+    Returns:
+    --------
+    R : np.ndarray
+        3x3 rotation matrix
+    """
+    c = np.cos(angle)
+    s = np.sin(angle)
+    
+    if axis == 'x':
+        R = np.array([
+            [1, 0, 0],
+            [0, c, -s],
+            [0, s, c]
+        ])
+    elif axis == 'y':
+        R = np.array([
+            [c, 0, s],
+            [0, 1, 0],
+            [-s, 0, c]
+        ])
+    elif axis == 'z':
+        R = np.array([
+            [c, -s, 0],
+            [s, c, 0],
+            [0, 0, 1]
+        ])
+    else:
+        raise ValueError("Axis must be 'x', 'y', or 'z'")
+    
+    return R
+
+@staticmethod
+def angular_separation(ra1: float, dec1: float, 
+                      ra2: float, dec2: float) -> float:
+    """
+    Calculate angular separation between two points on celestial sphere.
+    
+    Uses haversine formula.
+    
+    Parameters:
+    -----------
+    ra1, dec1 : float
+        Right ascension and declination of point 1 (rad)
+    ra2, dec2 : float
+        Right ascension and declination of point 2 (rad)
+        
+    Returns:
+    --------
+    sep : float
+        Angular separation (rad)
+    """
+    # Haversine formula
+    delta_ra = ra2 - ra1
+    delta_dec = dec2 - dec1
+    
+    a = np.sin(delta_dec/2)**2 + \
+        np.cos(dec1) * np.cos(dec2) * np.sin(delta_ra/2)**2
+    
+    sep = 2 * np.arcsin(np.sqrt(a))
+    
+    return sep
+============================================================================
+SECTION 9: VISUALIZATION
+============================================================================
+class SpaceVisualization:
+"""
+Visualization tools for space mathematics.
+"""
+@staticmethod
+def plot_orbit_3d(positions: np.ndarray, 
+                 title: str = "Orbital Trajectory"):
+    """
+    Plot 3D orbital trajectory.
+    
+    Parameters:
+    -----------
+    positions : np.ndarray
+        Position array (n_points x 3)
+    title : str
+        Plot title
+    """
+    from mpl_toolkits.mplot3d import Axes3D
+    
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Plot trajectory
+    ax.plot(positions[:, 0], positions[:, 1], positions[:, 2], 
+           'b-', linewidth=1, alpha=0.7)
+    
+    # Plot start and end points
+    ax.scatter(positions[0, 0], positions[0, 1], positions[0, 2],
+              c='green', s=100, label='Start')
+    ax.scatter(positions[-1, 0], positions[-1, 1], positions[-1, 2],
+              c='red', s=100, label='End')
+    
+    # Plot central body
+    u = np.linspace(0, 2 * np.pi, 50)
+    v = np.linspace(0, np.pi, 50)
+    x = 0.05 * np.max(np.abs(positions)) * np.outer(np.cos(u), np.sin(v))
+    y = 0.05 * np.max(np.abs(positions)) * np.outer(np.sin(u), np.sin(v))
+    z = 0.05 * np.max(np.abs(positions)) * np.outer(np.ones(np.size(u)), np.cos(v))
+    ax.plot_surface(x, y, z, color='yellow', alpha=0.6)
+    
+    ax.set_xlabel('X (m)')
+    ax.set_ylabel('Y (m)')
+    ax.set_zlabel('Z (m)')
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.legend()
+    
+    # Equal aspect ratio
+    max_range = np.max(np.abs(positions))
+    ax.set_xlim([-max_range, max_range])
+    ax.set_ylim([-max_range, max_range])
+    ax.set_zlim([-max_range, max_range])
+    
+    plt.tight_layout()
+    return fig
+
+@staticmethod
+def plot_porkchop(porkchop_data: Dict,
+                 title: str = "Porkchop Plot"):
+    """
+    Plot porkchop diagram for interplanetary transfers.
+    
+    Parameters:
+    -----------
+    porkchop_data : dict
+        Porkchop plot data
+    title : str
+        Plot title
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # C3 at departure
+    im1 = axes[0].contourf(porkchop_data['departure_dates'],
+                          porkchop_data['arrival_dates'],
+                          porkchop_data['c3_departure'].T,
+                          levels=20, cmap='viridis')
+    axes[0].set_xlabel('Departure Date (days)')
+    axes[0].set_ylabel('Arrival Date (days)')
+    axes[0].set_title('C3 at Departure (m²/s²)')
+    plt.colorbar(im1, ax=axes[0])
+    
+    # C3 at arrival
+    im2 = axes[1].contourf(porkchop_data['departure_dates'],
+                          porkchop_data['arrival_dates'],
+                          porkchop_data['c3_arrival'].T,
+                          levels=20, cmap='plasma')
+    axes[1].set_xlabel('Departure Date (days)')
+    axes[1].set_ylabel('Arrival Date (days)')
+    axes[1].set_title('C3 at Arrival (m²/s²)')
+    plt.colorbar(im2, ax=axes[1])
+    
+    fig.suptitle(title, fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    
+    return fig
+
+@staticmethod
+def plot_three_body(solution: Dict,
+                   title: str = "Three-Body System"):
+    """
+    Plot three-body system trajectories.
+    
+    Parameters:
+    -----------
+    solution : dict
+        Three-body simulation results
+    title : str
+        Plot title
+    """
+    from mpl_toolkits.mplot3d import Axes3D
+    
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    
+    positions = solution['positions']
+    masses = solution['masses']
+    
+    colors = ['red', 'blue', 'green']
+    labels = [f'Body {i+1} ({masses[i]/PhysicalConstants.M_sun:.2e} M☉)' 
+             for i in range(3)]
+    
+    for i, (pos, color, label) in enumerate(zip(positions, colors, labels)):
+        ax.plot(pos[:, 0], pos[:, 1], pos[:, 2],
+               color=color, linewidth=1, alpha=0.7, label=label)
+        
+        # Mark initial positions
+        ax.scatter(pos[0, 0], pos[0, 1], pos[0, 2],
+                  c=color, s=100, marker='o', edgecolors='black')
+    
+    ax.set_xlabel('X (m)')
+    ax.set_ylabel('Y (m)')
+    ax.set_zlabel('Z (m)')
+    ax.set_title(title, fontsize=14, fontweight='bold')
+    ax.legend()
+    
+    plt.tight_layout()
+    return fig
+============================================================================
+SECTION 10: INTEGRATED SPACE MATHEMATICS FRAMEWORK
+============================================================================
+class SpaceMathematicsFramework:
+"""
+Integrated framework for space mathematics computations.
+"""
+def __init__(self):
+    self.constants = PhysicalConstants()
+    self.orbital = OrbitalMechanics()
+    self.celestial = CelestialMechanics()
+    self.cosmology = Cosmology()
+    self.stellar = StellarPhysics()
+    self.relativity = RelativisticGravity()
+    self.mission = MissionPlanning()
+    self.environment = SpaceEnvironment()
+    self.geometry = SpaceGeometry()
+    self.viz = SpaceVisualization()
+    
+    print("Space Mathematics Framework Initialized")
+    print("Version 1.0.0")
+    print("=" * 70)
+
+def mission_analysis(self, mission_type: str, **kwargs) -> Dict:
+    """
+    Comprehensive mission analysis.
+    
+    Parameters:
+    -----------
+    mission_type : str
+        Type of mission ('LEO', 'GEO', 'lunar', 'interplanetary')
+    **kwargs : dict
+        Mission-specific parameters
+        
+    Returns:
+    --------
+    analysis : dict
+        Mission analysis results
+    """
+    print(f"\n{'=' * 70}")
+    print(f"MISSION ANALYSIS: {mission_type.upper()}")
+    print(f"{'=' * 70}")
+    
+    results =
+
+
+{
+'mission_type': mission_type,
+'parameters': kwargs
+}
+if mission_type == 'LEO':
+        # Low Earth Orbit mission
+        altitude = kwargs.get('altitude', 400e3)  # Default 400 km
+        
+        r = PhysicalConstants.R_earth + altitude
+        mu = PhysicalConstants.G * PhysicalConstants.M_earth
+        
+        # Orbital velocity
+        v_orbit = np.sqrt(mu / r)
+        
+        # Orbital period
+        T = 2 * np.pi * np.sqrt(r**3 / mu)
+        
+        # Escape velocity at this altitude
+        v_esc = self.orbital.escape_velocity(r, mu)
+        
+        results['orbit'] = {
+            'altitude': altitude,
+            'radius': r,
+            'velocity': v_orbit,
+            'period': T,
+            'period_minutes': T / 60,
+            'escape_velocity': v_esc
+        }
+        
+        print(f"\nLEO Parameters:")
+        print(f"  Altitude: {altitude/1e3:.1f} km")
+        print(f"  Orbital velocity: {v_orbit/1e3:.2f} km/s")
+        print(f"  Orbital period: {T/60:.2f} minutes")
+        print(f"  Escape velocity: {v_esc/1e3:.2f} km/s")
+    
+    elif mission_type == 'lunar':
+        # Lunar mission analysis
+        r_earth = PhysicalConstants.R_earth
+        r_moon = 384400e3  # Earth-Moon distance
+        mu_earth = PhysicalConstants.G * PhysicalConstants.M_earth
+        
+        # Trans-Lunar Injection (TLI)
+        print("\n1. Trans-Lunar Injection Analysis...")
+        
+        # LEO parking orbit
+        r_leo = r_earth + 200e3  # 200 km altitude
+        v_leo = np.sqrt(mu_earth / r_leo)
+        
+        # TLI velocity
+        v_tli = np.sqrt(mu_earth * (2/r_leo - 2/(r_leo + r_moon)))
+        
+        # Delta-v for TLI
+        dv_tli = v_tli - v_leo
+        
+        # Transfer time (simplified)
+        a_transfer = (r_leo + r_moon) / 2
+        t_transfer = np.pi * np.sqrt(a_transfer**3 / mu_earth)
+        
+        results['tli'] = {
+            'delta_v': dv_tli,
+            'transfer_time': t_transfer,
+            'transfer_time_hours': t_transfer / 3600
+        }
+        
+        print(f"  TLI Δv: {dv_tli/1e3:.3f} km/s")
+        print(f"  Transfer time: {t_transfer/3600:.1f} hours")
+        
+        # Lunar orbit insertion
+        print("\n2. Lunar Orbit Insertion...")
+        r_moon_orbit = 1737.4e3 + 100e3  # 100 km lunar orbit
+        mu_moon = PhysicalConstants.G * 7.342e22  # Moon mass
+        
+        v_moon_orbit = np.sqrt(mu_moon / r_moon_orbit)
+        v_approach = np.sqrt(mu_earth * 2/r_moon)  # Approximate
+        
+        dv_loi = abs(v_moon_orbit - v_approach/10)  # Simplified
+        
+        results['loi'] = {
+            'delta_v': dv_loi,
+            'orbit_velocity': v_moon_orbit
+        }
+        
+        print(f"  LOI Δv: {dv_loi/1e3:.3f} km/s")
+        
+        # Total delta-v
+        dv_total = dv_tli + dv_loi
+        results['total_delta_v'] = dv_total
+        
+        print(f"\n3. Total Mission Δv: {dv_total/1e3:.3f} km/s")
+    
+    elif mission_type == 'interplanetary':
+        # Interplanetary mission
+        target = kwargs.get('target', 'Mars')
+        
+        print(f"\n1. Interplanetary Transfer to {target}...")
+        
+        # Simplified calculation
+        if target == 'Mars':
+            r1 = 1.0 * PhysicalConstants.AU
+            r2 = 1.524 * PhysicalConstants.AU
+        elif target == 'Venus':
+            r1 = 1.0 * PhysicalConstants.AU
+            r2 = 0.723 * PhysicalConstants.AU
+        elif target == 'Jupiter':
+            r1 = 1.0 * PhysicalConstants.AU
+            r2 = 5.203 * PhysicalConstants.AU
+        else:
+            print(f"  Unknown target: {target}")
+            return results
+        
+        mu_sun = PhysicalConstants.G * PhysicalConstants.M_sun
+        
+        # Hohmann transfer
+        transfer = self.orbital.hohmann_transfer(r1, r2, mu_sun)
+        
+        results['transfer'] = transfer
+        
+        print(f"  Departure Δv: {transfer['dv1']/1e3:.3f} km/s")
+        print(f"  Arrival Δv: {transfer['dv2']/1e3:.3f} km/s")
+        print(f"  Total Δv: {transfer['dv_total']/1e3:.3f} km/s")
+        print(f"  Transfer time: {transfer['transfer_time']/86400:.1f} days")
+    
+    elif mission_type == 'GEO':
+        # Geostationary orbit
+        print("\n1. Geostationary Orbit Parameters...")
+        
+        # GEO altitude
+        mu_earth = PhysicalConstants.G * PhysicalConstants.M_earth
+        T_geo = 86400  # 24 hours in seconds
+        
+        r_geo = (mu_earth * (T_geo/(2*np.pi))**2)**(1/3)
+        altitude_geo = r_geo - PhysicalConstants.R_earth
+        
+        v_geo = np.sqrt(mu_earth / r_geo)
+        
+        results['geo'] = {
+            'radius': r_geo,
+            'altitude': altitude_geo,
+            'velocity': v_geo
+        }
+        
+        print(f"  GEO altitude: {altitude_geo/1e3:.1f} km")
+        print(f"  Orbital velocity: {v_geo/1e3:.3f} km/s")
+        
+        # Transfer from LEO
+        r_leo = PhysicalConstants.R_earth + 200e3
+        transfer = self.orbital.hohmann_transfer(r_leo, r_geo, mu_earth)
+        
+        results['leo_to_geo'] = transfer
+        
+        print(f"\n2. LEO to GEO Transfer:")
+        print(f"  Total Δv: {transfer['dv_total']/1e3:.3f} km/s")
+        print(f"  Transfer time: {transfer['transfer_time']/3600:.2f} hours")
+    
+    print("\n" + "=" * 70)
+    
+    return results
+
+def stellar_analysis(self, mass: float, name: str = "Star") -> Dict:
+    """
+    Comprehensive stellar analysis.
+    
+    Parameters:
+    -----------
+    mass : float
+        Stellar mass (in solar masses)
+    name : str
+        Star identifier
+        
+    Returns:
+    --------
+    analysis : dict
+        Stellar properties
+    """
+    M = mass * PhysicalConstants.M_sun
+    
+    print(f"\n{'=' * 70}")
+    print(f"STELLAR ANALYSIS: {name}")
+    print(f"{'=' * 70}")
+    print(f"Mass: {mass:.2f} M☉")
+    
+    # Luminosity
+    L = self.stellar.main_sequence_mass_luminosity(M)
+    L_ratio = L / PhysicalConstants.L_sun
+    
+    # Main sequence lifetime
+    t_ms = self.stellar.main_sequence_lifetime(M)
+    t_ms_years = t_ms / PhysicalConstants.year_to_s
+    
+    # Effective temperature (from L and assumed radius)
+    # Assume main sequence: R ∝ M^0.8
+    R = PhysicalConstants.R_sun * mass**0.8
+    
+    # Stefan-Boltzmann: L = 4πR²σT⁴
+    T_eff = (L / (4 * np.pi * R**2 * PhysicalConstants.sigma))**0.25
+    
+    # Peak wavelength
+    lambda_max = self.stellar.wien_displacement_law(T_eff)
+    
+    # Schwarzschild radius
+    r_s = self.stellar.schwarzschild_radius(M)
+    
+    # Eddington luminosity
+    L_edd = self.stellar.eddington_luminosity(M)
+    L_edd_ratio = L / L_edd
+    
+    results = {
+        'mass': M,
+        'mass_solar': mass,
+        'luminosity': L,
+        'luminosity_solar': L_ratio,
+        'radius': R,
+        'radius_solar': R / PhysicalConstants.R_sun,
+        'temperature': T_eff,
+        'peak_wavelength': lambda_max,
+        'main_sequence_lifetime': t_ms,
+        'lifetime_years': t_ms_years,
+        'schwarzschild_radius': r_s,
+        'eddington_luminosity': L_edd,
+        'eddington_ratio': L_edd_ratio
+    }
+    
+    print(f"\nLuminosity: {L_ratio:.3e} L☉")
+    print(f"Radius: {R/PhysicalConstants.R_sun:.2f} R☉")
+    print(f"Effective Temperature: {T_eff:.0f} K")
+    print(f"Peak Wavelength: {lambda_max*1e9:.1f} nm")
+    print(f"Main Sequence Lifetime: {t_ms_years:.2e} years")
+    print(f"Schwarzschild Radius: {r_s/1e3:.2f} km")
+    print(f"L/L_Edd: {L_edd_ratio:.3e}")
+    
+    # Spectral classification
+    if T_eff > 30000:
+        spectral_class = "O (Blue)"
+    elif T_eff > 10000:
+        spectral_class = "B (Blue-white)"
+    elif T_eff > 7500:
+        spectral_class = "A (White)"
+    elif T_eff > 6000:
+        spectral_class = "F (Yellow-white)"
+    elif T_eff > 5200:
+        spectral_class = "G (Yellow)"
+    elif T_eff > 3700:
+        spectral_class = "K (Orange)"
+    else:
+        spectral_class = "M (Red)"
+    
+    results['spectral_class'] = spectral_class
+    print(f"Spectral Class: {spectral_class}")
+    
+    print("=" * 70)
+    
+    return results
+
+def cosmological_analysis(self, z: float) -> Dict:
+    """
+    Comprehensive cosmological analysis at redshift z.
+    
+    Parameters:
+    -----------
+    z : float
+        Redshift
+        
+    Returns:
+    --------
+    analysis : dict
+        Cosmological parameters
+    """
+    print(f"\n{'=' * 70}")
+    print(f"COSMOLOGICAL ANALYSIS at z = {z:.4f}")
+    print(f"{'=' * 70}")
+    
+    # Distances
+    d_c = self.cosmology.comoving_distance(z)
+    d_L = self.cosmology.luminosity_distance(z)
+    d_A = self.cosmology.angular_diameter_distance(z)
+    
+    # Time
+    t_lookback = self.cosmology.lookback_time(z)
+    t_age = self.cosmology.age_of_universe(z)
+    
+    # Hubble parameter
+    H_z = self.cosmology.hubble_parameter(z)
+    
+    # Critical density
+    rho_crit = self.cosmology.critical_density(z)
+    
+    results = {
+        'redshift': z,
+        'comoving_distance': d_c,
+        'comoving_distance_Mpc': d_c / PhysicalConstants.pc / 1e6,
+        'luminosity_distance': d_L,
+        'luminosity_distance_Mpc': d_L / PhysicalConstants.pc / 1e6,
+        'angular_diameter_distance': d_A,
+        'angular_diameter_distance_Mpc': d_A / PhysicalConstants.pc / 1e6,
+        'lookback_time': t_lookback,
+        'lookback_time_Gyr': t_lookback / PhysicalConstants.year_to_s / 1e9,
+        'age_of_universe': t_age,
+        'age_Gyr': t_age / PhysicalConstants.year_to_s / 1e9,
+        'hubble_parameter': H_z,
+        'critical_density': rho_crit
+    }
+    
+    print(f"\nDistances:")
+    print(f"  Comoving: {d_c/PhysicalConstants.pc/1e6:.2f} Mpc")
+    print(f"  Luminosity: {d_L/PhysicalConstants.pc/1e6:.2f} Mpc")
+    print(f"  Angular Diameter: {d_A/PhysicalConstants.pc/1e6:.2f} Mpc")
+    
+    print(f"\nTime:")
+    print(f"  Lookback: {t_lookback/PhysicalConstants.year_to_s/1e9:.3f} Gyr")
+    print(f"  Age of Universe: {t_age/PhysicalConstants.year_to_s/1e9:.3f} Gyr")
+    
+    print(f"\nDynamics:")
+    print(f"  H(z): {H_z*1e3/PhysicalConstants.pc/1e6:.2f} km/s/Mpc")
+    print(f"  ρ_crit: {rho_crit:.3e} kg/m³")
+    
+    print("=" * 70)
+    
+    return results
+
+def generate_comprehensive_report(self, analysis_type: str, 
+                                 results: Dict,
+                                 filename: str = None) -> str:
+    """
+    Generate comprehensive analysis report.
+    
+    Parameters:
+    -----------
+    analysis_type : str
+        Type of analysis
+    results : dict
+        Analysis results
+    filename : str
+        Optional file to save report
+        
+    Returns:
+    --------
+    report : str
+        Formatted report text
+    """
+    report = []
+    report.append("=" * 70)
+    report.append("SPACE MATHEMATICS FRAMEWORK - ANALYSIS REPORT")
+    report.append("=" * 70)
+    report.append(f"\nAnalysis Type: {analysis_type.upper()}")
+    report.append(f"Generated: {np.datetime64('now')}")
+    report.append("\n" + "-" * 70)
+    
+    if analysis_type == 'mission':
+        report.append("\nMISSION ANALYSIS SUMMARY")
+        report.append(f"Mission Type: {results['mission_type']}")
+        
+        if 'orbit' in results:
+            report.append("\nOrbital Parameters:")
+            orbit = results['orbit']
+            report.append(f"  Altitude: {orbit['altitude']/1e3:.1f} km")
+            report.append(f"  Velocity: {orbit['velocity']/1e3:.2f} km/s")
+            report.append(f"  Period: {orbit['period_minutes']:.2f} minutes")
+        
+        if 'total_delta_v' in results:
+            report.append(f"\nTotal Mission Δv: {results['total_delta_v']/1e3:.3f} km/s")
+    
+    elif analysis_type == 'stellar':
+        report.append("\nSTELLAR PROPERTIES")
+        report.append(f"Mass: {results['mass_solar']:.2f} M☉")
+        report.append(f"Luminosity: {results['luminosity_solar']:.3e} L☉")
+        report.append(f"Radius: {results['radius_solar']:.2f} R☉")
+        report.append(f"Temperature: {results['temperature']:.0f} K")
+        report.append(f"Spectral Class: {results['spectral_class']}")
+        report.append(f"Main Sequence Lifetime: {results['lifetime_years']:.2e} years")
+    
+    elif analysis_type == 'cosmological':
+        report.append("\nCOSMOLOGICAL PARAMETERS")
+        report.append(f"Redshift: {results['redshift']:.4f}")
+        report.append(f"Comoving Distance: {results['comoving_distance_Mpc']:.2f} Mpc")
+        report.append(f"Luminosity Distance: {results['luminosity_distance_Mpc']:.2f} Mpc")
+        report.append(f"Lookback Time: {results['lookback_time_Gyr']:.3f} Gyr")
+        report.append(f"Age of Universe: {results['age_Gyr']:.3f} Gyr")
+    
+    report.append("\n" + "=" * 70)
+    
+    report_text = "\n".join(report)
+    
+    if filename:
+        with open(filename, 'w') as f:
+            f.write(report_text)
+        print(f"\nReport saved to: {filename}")
+    
+    return report_text
+============================================================================
+SECTION 11: EXAMPLE WORKFLOWS AND DEMONSTRATIONS
+============================================================================
+def demo_orbital_transfer():
+"""
+Demonstrate orbital transfer calculation.
+"""
+print("\n" + "=" * 70)
+print("DEMO: Earth to Mars Hohmann Transfer")
+print("=" * 70)
+# Earth and Mars orbital radii
+r_earth = 1.0 * PhysicalConstants.AU
+r_mars = 1.524 * PhysicalConstants.AU
+mu_sun = PhysicalConstants.G * PhysicalConstants.M_sun
+
+# Calculate Hohmann transfer
+orbital = OrbitalMechanics()
+transfer = orbital.hohmann_transfer(r_earth, r_mars, mu_sun)
+
+print(f"\nTransfer Parameters:")
+print(f"  Semi-major axis: {transfer['a_transfer']/PhysicalConstants.AU:.3f} AU")
+print(f"  Departure Δv: {transfer['dv1']/1e3:.3f} km/s")
+print(f"  Arrival Δv: {transfer['dv2']/1e3:.3f} km/s")
+print(f"  Total Δv: {transfer['dv_total']/1e3:.3f} km/s")
+print(f"  Transfer time: {transfer['transfer_time']/86400:.1f} days")
+
+return transfer
+def demo_three_body_simulation():
+"""
+Demonstrate three-body problem simulation.
+"""
+print("\n" + "=" * 70)
+print("DEMO: Three-Body System Simulation")
+print("=" * 70)
+# Sun-Earth-Moon-like system (scaled)
+M_sun = PhysicalConstants.M_sun
+M_earth = PhysicalConstants.M_earth
+M_moon = 7.342e22
+
+masses = np.array([M_sun, M_earth, M_moon])
+
+# Initial positions (simplified)
+AU = PhysicalConstants.AU
+r1 = np.array([0, 0, 0])  # Sun at origin
+r2 = np.array([AU, 0, 0])  # Earth
+r3 = np.array([AU + 384400e3, 0, 0])  # Moon
+
+initial_positions = np.array([r1, r2, r3])
+
+# Initial velocities (circular orbits)
+mu_sun = PhysicalConstants.G * M_sun
+v_earth = np.sqrt(mu_sun / AU)
+
+v1 = np.array([0, 0, 0])
+v2 = np.array([0, v_earth, 0])
+v3 = np.array([0, v_earth + 1022, 0])  # Moon orbital velocity + Earth velocity
+
+initial_velocities = np.array([v1, v2, v3])
+
+# Simulate
+celestial = CelestialMechanics()
+solution = celestial.simulate_three_body(
+    masses,
+    initial_positions,
+    initial_velocities,
+    (0, 365.25 * 86400),  # 1 year
+    n_points=1000
+)
+
+print(f"\nSimulation completed: {solution['success']}")
+print(f"Time span: {solution['time'][-1]/86400:.1f} days")
+
+# Visualize
+viz = SpaceVisualization()
+fig = viz.plot_three_body(solution)
+
+return solution, fig
+def demo_cosmological_distances():
+"""
+Demonstrate cosmological distance calculations.
+"""
+print("\n" + "=" * 70)
+print("DEMO: Cosmological Distances vs Redshift")
+print("=" * 70)
+redshifts = np.logspace(-2, 1, 50)  # z = 0.01 to 10
+
+cosmo = Cosmology()
+
+d_comoving = []
+d_luminosity = []
+d_angular = []
+
+for z in redshifts:
+    d_comoving.append(cosmo.comoving_distance(z) / PhysicalConstants.pc / 1e6)
+    d_luminosity.append(cosmo.luminosity_distance(z) / PhysicalConstants.pc / 1e6)
+    d_angular.append(cosmo.angular_diameter_distance(z) / PhysicalConstants.pc / 1e6)
+
+# Plot
+fig, ax = plt.subplots(figsize=(12, 8))
+
+ax.loglog(redshifts, d_comoving, label='Comoving Distance', linewidth=2)
+ax.loglog(redshifts, d_luminosity, label='Luminosity Distance', linewidth=2)
+ax.loglog(redshifts, d_angular, label='Angular Diameter Distance', linewidth=2)
+
+ax.set_xlabel('Redshift z', fontsize=12)
+ax.set_ylabel('Distance (Mpc)', fontsize=12)
+ax.set_title('Cosmological Distances vs Redshift', fontsize=14, fontweight='bold')
+ax.legend(fontsize=11)
+ax.grid(True, alpha=0.3)
+
+plt.tight_layout()
+
+print("\nDistance comparison at z=1:")
+idx = np.argmin(np.abs(redshifts - 1.0))
+print(f"  Comoving: {d_comoving[idx]:.1f} Mpc")
+print(f"  Luminosity: {d_luminosity[idx]:.1f} Mpc")
+print(f"  Angular Diameter: {d_angular[idx]:.1f} Mpc")
+
+return fig
+def demo_stellar_evolution():
+"""
+Demonstrate stellar properties across mass range.
+"""
+print("\n" + "=" * 70)
+print("DEMO: Stellar Properties vs Mass")
+print("=" * 70)
+masses = np.logspace(-0.5, 1.5, 50)  # 0.3 to 30 solar masses
+
+stellar = StellarPhysics()
+
+luminosities = []
+lifetimes = []
+
+for m in masses:
+    M = m * PhysicalConstants.M_sun
+    L = stellar.main_sequence_mass_luminosity(M)
+    t = stellar.main_sequence_lifetime(M)
+    
+    luminosities.append(L / PhysicalConstants.L_sun)
+    lifetimes.append(t / PhysicalConstants.year_to_s)
+
+# Plot
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+
+# Mass-Luminosity
+ax1.loglog(masses, luminosities, linewidth=2, color='orange')
+ax1.axhline(1, color='red', linestyle='--', alpha=0.5, label='Sun')
+ax1.axvline(1, color='red', linestyle='--', alpha=0.5)
+ax1.set_xlabel('Mass (M☉)', fontsize=12)
+ax1.set_ylabel('Luminosity (L☉)', fontsize=12)
+ax1.set_title('Main Sequence Mass-Luminosity Relation', fontsize=13, fontweight='bold')
+ax1.grid(True, alpha=0.3)
+ax1.legend()
+
+# Mass-Lifetime
+ax2.loglog(masses, lifetimes, linewidth=2, color='blue')
+ax2.axhline(1e10, color='red', linestyle='--', alpha=0.5, label='Sun (~10 Gyr)')
+ax2.axvline(1, color='red', linestyle='--', alpha=0.5)
+ax2.set_xlabel('Mass (M☉)', fontsize=12)
+ax2.set_ylabel('Main Sequence Lifetime (years)', fontsize=12)
+ax2.set_title('Main Sequence Lifetime vs Mass', fontsize=13, fontweight='bold')
+ax2.grid(True, alpha=0.3)
+ax2.legend()
+
+plt.tight_layout()
+
+print("\nStellar properties:")
+for m_check in [0.5, 1.0, 5.0, 20.0]:
+    idx = np.argmin(np.abs(masses - m_check))
+    print(f"  {m_check} M☉: L = {luminosities[idx]:.2e} L☉, "
+          f"t_MS = {lifetimes[idx]:.2e} years")
+
+return fig
+def main():
+"""
+Main entry point with demonstrations.
+"""
+import sys
+if len(sys.argv) > 1:
+    command = sys.argv[1]
+    
+    if command == 'demo':
+        demo_type = sys.argv[2] if len(sys.argv) > 2 else 'all'
+        
+        if demo_type == 'orbit' or demo_type == 'all':
+            demo_orbital_transfer()
+        
+        if demo_type == 'threebody' or demo_type == 'all':
+            solution, fig = demo_three_body_simulation()
+            plt.show()
+        
+        if demo_type == 'cosmo' or demo_type == 'all':
+            fig = demo_cosmological_distances()
+            plt.show()
+        
+        if demo_type == 'stellar' or demo_type == 'all':
+            fig = demo_stellar_evolution()
+            plt.show()
+    
+    elif command == 'mission':
+        mission_type = sys.argv[2] if len(sys.argv) > 2 else 'LEO'
+        framework = SpaceMathematicsFramework()
+        results = framework.mission_analysis(mission_type)
+    
+    else:
+        print(f"Unknown command: {command}")
+        print("Usage: python space_mathematics.py [demo|mission] [options]")
+
+else:
+    # Interactive mode
+    print("\nSpace Mathematics Framework")
+    print("Select demonstration:")
+    print("1. Orbital transfer (Earth to Mars)")
+    print("2. Three-body simulation")
+    print("3. Cosmological distances")
+    print("4. Stellar evolution")
+    print("5. Mission analysis")
+    
+    choice = input("\nChoice (1-5): ").strip()
+    
+    if choice == '1':
+        demo_orbital_transfer()
+    elif choice == '2':
+        solution, fig = demo_three_body_simulation()
+        plt.show()
+    elif choice == '3':
+        fig = demo_cosmological_distances()
+        plt.show()
+    elif choice == '4':
+        fig = demo_stellar_evolution()
+        plt.show()
+    elif choice == '5':
+        framework = SpaceMathematicsFramework()
+        mission_type = input("Mission type (LEO/GEO/lunar/interplanetary): ").strip()
+        results = framework.mission_analysis(mission_type)
+if name == "main":
+main()
+---
+
+## USAGE EXAMPLES
+
+```python
+# Quick start
+from space_mathematics import SpaceMathematicsFramework
+
+# Initialize framework
+framework = SpaceMathematicsFramework()
+
+# 1. Mission Analysis
+results = framework.mission_analysis('lunar')
+
+# 2. Stellar Analysis
+star_results = framework.stellar_analysis(mass=2.5, name="Sirius A")
+
+# 3. Cosmological Analysis
+cosmo_results = framework.cosmological_analysis(z=3.0)
+
+# 4. Generate report
+report = framework.generate_comprehensive_report('stellar', star_results)
+Save this as space_mathematics.py for your NASA AWG and Copernicus contributions! 🚀🌌
+This comprehensive framework provides advanced tools for orbital mechanics, celestial dynamics, cosmology, stellar physics, mission planning, and more - perfect for space research and mission design!
