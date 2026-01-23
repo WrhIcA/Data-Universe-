@@ -10,3 +10,9 @@ this repository is a platform for datas to work with copernicus,  Nasa AWG , Geo
 hare you find resources to develop contribution to those open source...
 
 It is a research data repository that open door for researcher to research...
+If you like to get suggestions directly this is mu mail address,  you also can see my research hare:
+email: Silwal.suraj722@gmail.com 
+orcid: https:// orcid.org/0009-0002-7602-188X
+zenodo : stromlight
+discord: stromflow_52987
+
